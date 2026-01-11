@@ -60,7 +60,7 @@
       100% { transform: translate(-50%, -50%) translateZ(20px) scale(1.1); }
     }
 
-    /* --- 弃牌堆 --- */
+    /* 弃牌堆 */
     .discard-pile {
       position: absolute;
       top: 50%;
@@ -149,6 +149,29 @@
       border: 1px solid #ff5252;
     }
     input[type=checkbox] { width: 20px; height: 20px; accent-color: #ff5252; cursor: pointer;}
+
+    /* 预知卡牌展示 */
+    .preview-row {
+      display: flex;
+      gap: 12px;
+      margin-top: 20px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .preview-card {
+      width: 90px;
+      height: 130px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.25);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+    }
+    .preview-card .icon { font-size: 40px; margin-bottom: 10px; }
+    .preview-card .name { font-size: 14px; opacity: 0.95; }
   </style>
 </head>
 
@@ -176,11 +199,34 @@
     </button>
   </div>
 
-  <!-- 死亡弹窗（结算时不显示，避免挡住“再来一局”） -->
+  <!-- 死亡弹窗（结算时不显示） -->
   <div v-if="amIDead && !isGameOver" class="modal-overlay" style="background: rgba(50,0,0,0.95);">
     <h1 style="font-size: 50px; color: red;">YOU DIED</h1>
     <p>你炸了。</p>
     <p style="color:#ccc; margin-top:10px;">等待本局结束...</p>
+  </div>
+
+  <!-- 预知弹窗 -->
+  <div v-if="isPreviewing" class="modal-overlay" style="background: rgba(0, 0, 0, 0.92);">
+    <h1 style="margin:0;">👁️ 预知：牌顶三张</h1>
+    <p style="color:#ccc; margin-top:10px;">仅你可见。顺序为：从牌顶到更下面。</p>
+
+    <div class="preview-row">
+      <div class="preview-card" v-for="(c, idx) in previewCards" :key="idx">
+        <div class="icon">{{ cardIcon(c) }}</div>
+        <div class="name">{{ c }}</div>
+      </div>
+      <div v-if="previewCards.length === 0" style="color:#ccc; margin-top:10px;">
+        牌库不足三张
+      </div>
+    </div>
+
+    <button class="confirm-btn"
+            style="background:#00e676; box-shadow:0 0 20px #00e676;"
+            @click="closePreview"
+    >
+      知道了
+    </button>
   </div>
 
   <!-- 拆弹弹窗 -->
@@ -221,15 +267,19 @@
           🟣 本局已结束
         </div>
         <div v-else-if="amIDead">已死亡</div>
-        <div v-else-if="isMyTurn" style="color:#00e676">🟢 轮到你了</div>
-        <div v-else>🔴 等待对手...</div>
+        <div v-else-if="isMyTurn" style="color:#00e676">
+          🟢 轮到你了（剩余回合：{{ turnsLeftForCurrent }}）
+        </div>
+        <div v-else>
+          🔴 等待对手...（对手剩余回合：{{ turnsLeftForCurrent }}）
+        </div>
 
         <div v-if="lastActionMsg" style="font-size:14px; color: #ffca28; margin-top:5px;">
           {{ lastActionMsg }}
         </div>
       </div>
 
-      <!-- 弃牌堆 -->
+      <!-- 弃牌堆（图标版） -->
       <div class="discard-pile" :title="discardTopCard ? ('顶牌：' + discardTopCard) : '弃牌堆为空'">
         <div class="topText">弃牌堆</div>
         <div class="topIcon">{{ cardIcon(discardTopCard) }}</div>
@@ -260,11 +310,10 @@
           class="card"
           :class="{
             'defuse': card === '拆除',
-            'playable': canPlayActiveCard && (card === '跳过' || card === '克隆牌')
+            'playable': canPlayActiveCard && isActiveCard(card)
           }"
-          @click="(card === '跳过' || card === '克隆牌') ? playActiveCard(card) : null"
-          :title="(card === '跳过') ? '点击使用：跳过本回合（不抽牌）' :
-                  (card === '克隆牌') ? '点击使用：克隆弃牌堆顶牌的效果（目前仅支持跳过）' : ''"
+          @click="isActiveCard(card) ? playActiveCard(card) : null"
+          :title="cardHelp(card)"
         >
           {{ card }}
         </div>
@@ -304,17 +353,38 @@
       const discardCount = ref(0);
       const discardTopCard = ref(null);
 
+      // 攻击可视化：当前玩家还剩回合数
+      const turnsLeftForCurrent = ref(0);
+
+      // 预知弹窗
+      const isPreviewing = ref(false);
+      const previewCards = ref([]);
+
+      const activeCards = ['跳过', '攻击', '预知', '克隆牌'];
+
+      const isActiveCard = (card) => activeCards.includes(card);
+
       const cardIcon = (card) => {
         switch (card) {
           case '炸弹': return '☠️';
           case '拆除': return '🛡';
           case '跳过': return '⏭';
+          case '攻击': return '⚔️';
+          case '预知': return '👁️';
           case '克隆牌': return '🧬';
           case '普通牌': return '🟦';
           case null:
           case undefined:
           default: return '—';
         }
+      };
+
+      const cardHelp = (card) => {
+        if (card === '跳过') return '跳过：结束本回合（不抽牌）';
+        if (card === '攻击') return '攻击：你不抽牌，强制下家连走两回合（可叠加）';
+        if (card === '预知') return '预知：查看牌顶三张（不结束回合）';
+        if (card === '克隆牌') return '克隆牌：克隆弃牌堆顶牌效果（支持：跳过/攻击/预知）';
+        return '';
       };
 
       function applyEnded(wid) {
@@ -348,6 +418,8 @@
         discardCount.value = data.discardCount ?? 0;
         discardTopCard.value = data.discardTopCard ?? null;
 
+        turnsLeftForCurrent.value = data.turnsLeftForCurrent ?? 0;
+
         if (myId.value && data.players && data.players[myId.value]) {
           const me = data.players[myId.value];
           myHand.value = me.hand;
@@ -370,6 +442,11 @@
         deckMaxIndex.value = data.maxIndex;
         insertIndex.value = data.maxIndex;
         isPublicInsert.value = false;
+      });
+
+      socket.on('previewCards', (data) => {
+        previewCards.value = (data && data.cards) ? data.cards : [];
+        isPreviewing.value = true;
       });
 
       socket.on('playerDied', (data) => {
@@ -406,6 +483,9 @@
         insertIndex.value = 0;
         topCardPublic.value = null;
 
+        isPreviewing.value = false;
+        previewCards.value = [];
+
         socket.emit('requestState');
       });
 
@@ -440,7 +520,6 @@
       };
 
       const playActiveCard = (card) => {
-        // 允许点击时也做一次明确反馈
         if (!myHand.value.includes(card)) {
           lastActionMsg.value = `⚠️ 你没有【${card}】`;
           return;
@@ -450,6 +529,11 @@
           return;
         }
         socket.emit('playCard', { card });
+      };
+
+      const closePreview = () => {
+        isPreviewing.value = false;
+        previewCards.value = [];
       };
 
       const confirmInsert = () => {
@@ -472,7 +556,11 @@
 
         discardCount, discardTopCard, cardIcon,
 
-        isMyTurn, canPlayActiveCard,
+        turnsLeftForCurrent,
+
+        isPreviewing, previewCards, closePreview,
+
+        isMyTurn, canPlayActiveCard, isActiveCard, cardHelp,
 
         drawCard, playActiveCard, confirmInsert, requestRestart
       };
