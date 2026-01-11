@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="zh">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>爆炸小黄人 - 完整版</title>
+
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
   <script src="/socket.io/socket.io.js"></script>
 
@@ -213,6 +214,20 @@
     }
     .chat-input button:active { transform: scale(0.98); }
 
+    /* 折叠聊天面板 */
+    .chat-panel.collapsed { height: 44px; }
+    .chat-panel.collapsed .chat-body,
+    .chat-panel.collapsed .chat-input { display: none; }
+    .chat-toggle-btn {
+      border: none;
+      border-radius: 10px;
+      padding: 6px 10px;
+      cursor: pointer;
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+      font-weight: 700;
+    }
+
     .target-list {
       width: 90%;
       max-width: 420px;
@@ -235,11 +250,51 @@
     }
     .target-item:hover { border-color: rgba(0,230,118,0.6); }
     .target-item.disabled { opacity: 0.35; cursor: not-allowed; }
+
+    /* 手机适配：缩小面板占用 */
+    @media (max-width: 600px) {
+      .chat-panel { width: 92vw; right: 4vw; bottom: 10px; height: 220px; }
+      .player-panel { width: 92vw; right: 4vw; top: 10px; max-height: 26vh; }
+    }
+
+    /* --- 大号Toast（爆炸/拆弹提示） --- */
+    .toast {
+      position: fixed;
+      left: 50%;
+      top: 16px;
+      transform: translateX(-50%);
+      z-index: 2000;
+      min-width: 240px;
+      max-width: 92vw;
+      padding: 12px 16px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(0,0,0,0.65);
+      color: #fff;
+      font-weight: 800;
+      font-size: 16px;
+      text-align: center;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 12px 30px rgba(0,0,0,0.45);
+      animation: toastIn 0.18s ease-out;
+    }
+    .toast.boom { background: rgba(255, 82, 82, 0.85); }
+    .toast.defuse { background: rgba(0, 230, 118, 0.75); }
+    .toast.info { background: rgba(255, 202, 40, 0.65); color: #1a1a1a; }
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+      to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+    }
   </style>
 </head>
 
 <body>
 <div id="app">
+
+  <!-- Toast -->
+  <div v-if="toast.show" class="toast" :class="toast.kind">
+    {{ toast.text }}
+  </div>
 
   <!-- 玩家列表 -->
   <div class="player-panel">
@@ -264,12 +319,18 @@
     </div>
   </div>
 
-  <!-- 聊天区 -->
-  <div class="chat-panel">
+  <!-- 聊天区（可折叠） -->
+  <div class="chat-panel" :class="{ collapsed: chatCollapsed }">
     <div class="chat-header">
       <div>聊天</div>
-      <div style="font-size:12px; opacity:0.75;">在线：{{ playerCount }}</div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div style="font-size:12px; opacity:0.75;">在线：{{ playerCount }}</div>
+        <button class="chat-toggle-btn" @click="toggleChat">
+          {{ chatCollapsed ? '展开' : '收起' }}
+        </button>
+      </div>
     </div>
+
     <div class="chat-body" ref="chatBody">
       <div
         class="chat-msg"
@@ -281,6 +342,7 @@
         <span>{{ m.text }}</span>
       </div>
     </div>
+
     <div class="chat-input">
       <input
         v-model="chatInput"
@@ -517,6 +579,18 @@
       const chatInput = ref('');
       const chatBody = ref(null);
 
+      // 聊天折叠
+      const chatCollapsed = ref(false);
+
+      // Toast
+      const toast = ref({ show: false, text: '', kind: 'info' });
+      let toastTimer = null;
+      const showToast = (kind, text, ms = 2200) => {
+        toast.value = { show: true, kind, text };
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => { toast.value.show = false; }, ms);
+      };
+
       // 角色牌
       const characterCards = ['海绵爸爸', '派小星', '章鱼弟'];
 
@@ -528,7 +602,7 @@
       const activeTurnCards = ['跳过', '攻击', '预知', '克隆牌', '底抽', '洗混'];
       const nopeCard = '阻止';
 
-      // 关键修复：由服务端下发是否轮到我
+      // 关键：由服务端下发是否轮到我
       const isMyTurnServer = ref(false);
 
       const shortId = (id) => id ? id.slice(0, 6) : '';
@@ -654,18 +728,26 @@
         }
       }
 
+      const toggleChat = () => {
+        chatCollapsed.value = !chatCollapsed.value;
+        if (!chatCollapsed.value) autoScrollChat();
+      };
+
+      function applyChatDefaultByWidth() {
+        chatCollapsed.value = window.innerWidth <= 600;
+      }
+
+      let onResize = null;
+
       // --- Socket 监听 ---
       socket.on('connect', () => {
-        // 这里保留，但最终以 gameState.youId 为准
         myId.value = socket.id;
         socket.emit('requestState');
       });
 
       socket.on('gameState', (data) => {
-        // 兜底：以服务端给的 youId 为准（解决时序/重连）
         if (data.youId) myId.value = data.youId;
 
-        // 关键：由服务端下发
         isMyTurnServer.value = !!data.isMyTurn;
 
         playersPublic.value = data.players || {};
@@ -758,6 +840,39 @@
         lastActionMsg.value = `😵 你被 ${who} 抽走了一张牌`;
       });
 
+      // ✅ 爆炸：Toast 强提示（需要服务端 emit playerDied）
+      socket.on('playerDied', (data) => {
+        if (!data?.id) return;
+        if (data.id === myId.value) showToast('boom', '💥 你爆炸了！', 2600);
+        else showToast('boom', '💥 对手爆炸了！', 2600);
+      });
+
+      // ✅ 拆弹成功：Toast（需要服务端 emit bombDefused）
+      socket.on('bombDefused', (data) => {
+        if (!data?.id) return;
+        const via = data.via || '拆除';
+        if (data.id === myId.value) showToast('defuse', `🛡 你拆除了炸弹（${via}）`, 2200);
+        else showToast('defuse', `🛡 对手拆除了炸弹（${via}）`, 2200);
+      });
+
+      // ✅ 炸弹埋回：Toast
+      socket.on('bombInserted', () => {
+        showToast('info', '👀 炸弹已被塞回牌堆', 1600);
+        lastActionMsg.value = "👀 炸弹已被埋回...";
+      });
+
+      socket.on('bombDrawn', (data) => {
+        if (!data?.id) return;
+
+        if (data.id === myId.value) {
+            showToast('boom', '☠️ 你抽到了炸弹！', 2200);
+            lastActionMsg.value = '☠️ 你抽到了炸弹！';
+        } else {
+            showToast('boom', '☠️ 对手抽到了炸弹！', 2200);
+            lastActionMsg.value = '☠️ 对手抽到了炸弹！';
+        }
+    });
+
       socket.on('gameOver', (data) => applyEnded(data.winnerId));
 
       socket.on('gameRestarted', () => {
@@ -788,10 +903,18 @@
 
       onMounted(() => {
         msTimer = setInterval(tickMsLeft, 100);
+
+        applyChatDefaultByWidth();
+        onResize = () => applyChatDefaultByWidth();
+        window.addEventListener('resize', onResize);
+
         autoScrollChat();
       });
+
       onUnmounted(() => {
         if (msTimer) clearInterval(msTimer);
+        if (onResize) window.removeEventListener('resize', onResize);
+        if (toastTimer) clearTimeout(toastTimer);
       });
 
       // --- 交互 ---
@@ -898,21 +1021,16 @@
         isGameOver, isWinner, winReasonText,
         lastActionMsg,
         isPreviewing, previewCards,
-
         playersPublic, playerCount, otherPlayersSorted, shortId,
-
         chatMessages, chatInput, sendChat, chatBody, timeText,
-
         cardIcon, cardHelp, isCardPlayable, onCardClick,
         characterCards, cardCount,
-
         isChoosingTarget, pairCardToPlay, stealTargets, selectTarget, cancelChooseTarget,
-
         drawCard, confirmInsert, requestRestart, closePreview,
         pendingActionText,
-
-        // 服务端判定的回合
-        isMyTurnServer
+        isMyTurnServer,
+        chatCollapsed, toggleChat,
+        toast
       };
     }
   }).mount('#app');

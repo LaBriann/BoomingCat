@@ -413,6 +413,8 @@ function performDraw(playerId, fromBottom = false) {
   const card = fromBottom ? deck.shift() : deck.pop();
 
   if (card === '炸弹') {
+    io.emit('bombDrawn', { id: playerId });
+
     const player = players[playerId];
 
     // 弃牌堆顶拆除 + 手里克隆 => 优先克隆拆除
