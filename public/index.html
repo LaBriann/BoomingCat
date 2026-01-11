@@ -60,6 +60,47 @@
       100% { transform: translate(-50%, -50%) translateZ(20px) scale(1.1); }
     }
 
+    /* --- 弃牌堆 --- */
+    .discard-pile {
+      position: absolute;
+      top: 50%;
+      left: 25%;
+      width: 90px;
+      height: 125px;
+      background: #607d8b;
+      border: 4px solid white;
+      border-radius: 8px;
+      transform: translate(-50%, -50%) translateZ(2px);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      color: white;
+      font-weight: bold;
+      box-shadow: 5px 5px 15px rgba(0,0,0,0.5);
+      user-select: none;
+    }
+
+    .discard-pile .count {
+      position: absolute;
+      bottom: 10px;
+      font-size: 12px;
+      font-weight: normal;
+      opacity: 0.95;
+    }
+
+    .discard-pile .topIcon {
+      font-size: 34px;
+      line-height: 1;
+    }
+
+    .discard-pile .topText {
+      position: absolute;
+      top: 8px;
+      font-size: 12px;
+      font-weight: normal;
+      opacity: 0.95;
+    }
+
     .my-hand {
       position: absolute; bottom: 30px; width: 100%;
       display: flex; justify-content: center; gap: 10px;
@@ -79,7 +120,6 @@
 
     .card.defuse { background: #b9f6ca; color: #1b5e20; border: 2px solid #00c853; }
 
-    /* 跳过牌可用时高亮 */
     .card.playable {
       border: 2px solid #00e676;
       box-shadow: 0 0 12px rgba(0, 230, 118, 0.7);
@@ -136,7 +176,7 @@
     </button>
   </div>
 
-  <!-- 死亡弹窗：注意！结算时不显示，避免挡住“再来一局” -->
+  <!-- 死亡弹窗（结算时不显示，避免挡住“再来一局”） -->
   <div v-if="amIDead && !isGameOver" class="modal-overlay" style="background: rgba(50,0,0,0.95);">
     <h1 style="font-size: 50px; color: red;">YOU DIED</h1>
     <p>你炸了。</p>
@@ -189,6 +229,14 @@
         </div>
       </div>
 
+      <!-- 弃牌堆 -->
+      <div class="discard-pile" :title="discardTopCard ? ('顶牌：' + discardTopCard) : '弃牌堆为空'">
+        <div class="topText">弃牌堆</div>
+        <div class="topIcon">{{ cardIcon(discardTopCard) }}</div>
+        <div class="count">数量：{{ discardCount }}</div>
+      </div>
+
+      <!-- 牌库 -->
       <div
         class="draw-pile"
         :class="{
@@ -204,6 +252,7 @@
         </div>
       </div>
 
+      <!-- 手牌 -->
       <div class="my-hand">
         <div
           v-for="(card, i) in myHand"
@@ -211,10 +260,11 @@
           class="card"
           :class="{
             'defuse': card === '拆除',
-            'playable': canPlaySkip && card === '跳过'
+            'playable': canPlayActiveCard && (card === '跳过' || card === '克隆牌')
           }"
-          @click="(canPlaySkip && card === '跳过') ? playSkip() : null"
-          :title="(canPlaySkip && card === '跳过') ? '点击使用：跳过本回合（不抽牌）' : ''"
+          @click="(card === '跳过' || card === '克隆牌') ? playActiveCard(card) : null"
+          :title="(card === '跳过') ? '点击使用：跳过本回合（不抽牌）' :
+                  (card === '克隆牌') ? '点击使用：克隆弃牌堆顶牌的效果（目前仅支持跳过）' : ''"
         >
           {{ card }}
         </div>
@@ -231,7 +281,6 @@
 
   createApp({
     setup() {
-      // --- 状态 ---
       const myId = ref('');
       const myHand = ref([]);
       const deckCount = ref(0);
@@ -239,7 +288,7 @@
       const amIDead = ref(false);
       const lastActionMsg = ref('');
 
-      const phase = ref('waiting'); // waiting | playing | ended
+      const phase = ref('waiting');
 
       const isDefusing = ref(false);
       const insertIndex = ref(0);
@@ -251,9 +300,25 @@
       const isWinner = ref(false);
       const winReasonText = ref('');
 
+      // 弃牌堆
+      const discardCount = ref(0);
+      const discardTopCard = ref(null);
+
+      const cardIcon = (card) => {
+        switch (card) {
+          case '炸弹': return '☠️';
+          case '拆除': return '🛡';
+          case '跳过': return '⏭';
+          case '克隆牌': return '🧬';
+          case '普通牌': return '🟦';
+          case null:
+          case undefined:
+          default: return '—';
+        }
+      };
+
       function applyEnded(wid) {
         isGameOver.value = true;
-
         if (wid === null || wid === undefined) {
           isWinner.value = false;
           winReasonText.value = "☠️ 无人幸存（同归于尽）";
@@ -266,13 +331,11 @@
         }
       }
 
-      // --- 连接 ---
       socket.on('connect', () => {
         myId.value = socket.id;
         socket.emit('requestState');
       });
 
-      // --- 核心状态同步 ---
       socket.on('gameState', (data) => {
         if (!myId.value && socket.id) myId.value = socket.id;
 
@@ -282,7 +345,9 @@
 
         phase.value = data.phase || 'waiting';
 
-        // 同步自己数据
+        discardCount.value = data.discardCount ?? 0;
+        discardTopCard.value = data.discardTopCard ?? null;
+
         if (myId.value && data.players && data.players[myId.value]) {
           const me = data.players[myId.value];
           myHand.value = me.hand;
@@ -291,7 +356,6 @@
           if (socket.connected) socket.emit('requestState');
         }
 
-        // 用 phase 决定是否弹结算
         if (phase.value === 'ended') {
           applyEnded(data.winnerId);
         } else {
@@ -316,11 +380,15 @@
         lastActionMsg.value = "👀 炸弹已被埋回...";
       });
 
-      // 跳过牌提示
       socket.on('cardPlayed', (data) => {
         if (!data) return;
-        if (data.id === socket.id) lastActionMsg.value = `🃏 你使用了【${data.card}】`;
-        else lastActionMsg.value = `🃏 对手使用了【${data.card}】`;
+        const actor = (data.id === socket.id) ? '你' : '对手';
+
+        if (data.card === '克隆牌' && data.clonedCard) {
+          lastActionMsg.value = `🧬 ${actor} 使用了【克隆牌】，克隆【${data.clonedCard}】效果`;
+        } else {
+          lastActionMsg.value = `🃏 ${actor} 使用了【${data.card}】`;
+        }
       });
 
       socket.on('gameOver', (data) => {
@@ -345,20 +413,18 @@
         if (data && data.message) lastActionMsg.value = "⚠️ " + data.message;
       });
 
-      // --- 计算属性 ---
       const isMyTurn = computed(() => {
         return phase.value === 'playing'
           && socket.id === currentTurnId.value
           && !amIDead.value;
       });
 
-      const canPlaySkip = computed(() => {
+      const canPlayActiveCard = computed(() => {
         return phase.value === 'playing'
           && !isGameOver.value
           && !amIDead.value
           && isMyTurn.value
-          && !isDefusing.value
-          && myHand.value.includes('跳过');
+          && !isDefusing.value;
       });
 
       const insertPositionText = computed(() => {
@@ -368,15 +434,22 @@
         return `第 ${idx + 1} 张`;
       });
 
-      // --- 交互 ---
       const drawCard = () => {
         if (phase.value !== 'playing') return;
         if (isMyTurn.value && !isDefusing.value) socket.emit('drawCard');
       };
 
-      const playSkip = () => {
-        if (!canPlaySkip.value) return;
-        socket.emit('playCard', { card: '跳过' });
+      const playActiveCard = (card) => {
+        // 允许点击时也做一次明确反馈
+        if (!myHand.value.includes(card)) {
+          lastActionMsg.value = `⚠️ 你没有【${card}】`;
+          return;
+        }
+        if (!canPlayActiveCard.value) {
+          lastActionMsg.value = "⚠️ 当前不能出牌（非你回合/拆弹中/未开局/已结束）";
+          return;
+        }
+        socket.emit('playCard', { card });
       };
 
       const confirmInsert = () => {
@@ -392,17 +465,16 @@
       };
 
       return {
-        // state
         myHand, deckCount, currentTurnId, amIDead, lastActionMsg,
         phase,
         isDefusing, insertIndex, deckMaxIndex, insertPositionText, topCardPublic, isPublicInsert,
         isGameOver, isWinner, winReasonText,
 
-        // computed
-        isMyTurn, canPlaySkip,
+        discardCount, discardTopCard, cardIcon,
 
-        // actions
-        drawCard, playSkip, confirmInsert, requestRestart
+        isMyTurn, canPlayActiveCard,
+
+        drawCard, playActiveCard, confirmInsert, requestRestart
       };
     }
   }).mount('#app');

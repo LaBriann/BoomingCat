@@ -6,31 +6,32 @@ const io = require('socket.io')(http);
 app.use(express.static('public'));
 
 // --- 游戏核心数据 ---
-let players = {};          // { [id]: { id, hand, isDead } }
-let playerIds = [];        // 回合顺序
-let currentTurnIndex = 0;  // 当前回合索引
+let players = {};
+let playerIds = [];
+let currentTurnIndex = 0;
 let deck = [];
 let topCardPublic = null;
 
-// 游戏阶段：waiting / playing / ended
+// 弃牌堆
+let discardPile = [];
+
+// 游戏阶段
 let phase = 'waiting';
 let winnerId = null;
 
-// 正在拆弹的玩家（必须先 insertBomb 才能继续）
+// 正在拆弹的玩家（必须先 insertBomb）
 let defusingPlayerId = null;
 
-// 配置：至少人数才能开局
 const MIN_PLAYERS = 2;
-
-// 配置：初始手牌内容
 const STARTING_HAND = ['拆除', '拆除', '普通牌'];
 
-// 洗牌算法
+// 洗牌
 function shuffleDeck() {
   const cards = [
     '炸弹', '炸弹', '炸弹', '炸弹',
     '拆除', '拆除',
     '跳过', '跳过',
+    '克隆牌', '克隆牌',
     '普通牌', '普通牌', '普通牌', '普通牌', '普通牌'
   ];
   for (let i = cards.length - 1; i > 0; i--) {
@@ -44,6 +45,15 @@ function getAlivePlayers() {
   return playerIds.filter(pid => players[pid] && !players[pid].isDead);
 }
 
+function discard(card) {
+  if (!card) return;
+  discardPile.push(card);
+}
+
+function discardTop() {
+  return discardPile.length ? discardPile[discardPile.length - 1] : null;
+}
+
 function buildState() {
   const currentTurn =
     (phase === 'playing' && playerIds[currentTurnIndex])
@@ -55,6 +65,11 @@ function buildState() {
     deckCount: deck.length,
     currentTurn,
     topCardPublic,
+
+    // 弃牌堆（只下发数量 + 顶牌，避免过大）
+    discardCount: discardPile.length,
+    discardTopCard: discardTop(),
+
     phase,
     winnerId
   };
@@ -101,6 +116,9 @@ function startNewRound() {
   winnerId = null;
   defusingPlayerId = null;
 
+  // 新一局清空弃牌堆
+  discardPile = [];
+
   for (const id of playerIds) {
     if (!players[id]) continue;
     players[id].isDead = false;
@@ -115,14 +133,11 @@ function startNewRound() {
   broadcastState();
 }
 
-// 统一的阶段/结算判定：任何关键事件后都调用
 function recomputePhaseAndMaybeEndOrStart() {
-  // 清理无效 id
   playerIds = playerIds.filter(pid => players[pid]);
 
   const connectedCount = playerIds.length;
 
-  // 人数不足：进入 waiting（防止单人一直抽牌直到炸弹才结束）
   if (connectedCount < MIN_PLAYERS) {
     phase = 'waiting';
     winnerId = null;
@@ -133,13 +148,11 @@ function recomputePhaseAndMaybeEndOrStart() {
     return;
   }
 
-  // waiting 且人数够：自动开局
   if (phase === 'waiting') {
     startNewRound();
     return;
   }
 
-  // playing：检查活人
   if (phase === 'playing') {
     const alive = getAlivePlayers();
     if (alive.length <= 1) {
@@ -151,14 +164,13 @@ function recomputePhaseAndMaybeEndOrStart() {
     return;
   }
 
-  // ended：只广播状态（等玩家点 restart）
   broadcastState();
 }
 
 function nextTurn() {
   if (phase !== 'playing') return;
 
-  // 如果正在拆弹，回合不能推进
+  // 拆弹中不推进回合
   if (defusingPlayerId) {
     broadcastState();
     return;
@@ -183,6 +195,15 @@ function nextTurn() {
   broadcastState();
 }
 
+// 统一校验：是否允许该玩家在当前时刻主动出牌
+function validateCanPlayActiveCard(socket) {
+  if (phase !== 'playing') return { ok: false, msg: '当前不是游戏进行中，无法出牌' };
+  if (defusingPlayerId) return { ok: false, msg: '正在拆弹中，必须先把炸弹塞回去' };
+  if (!players[socket.id] || players[socket.id].isDead) return { ok: false, msg: '你已死亡，无法出牌' };
+  if (socket.id !== playerIds[currentTurnIndex]) return { ok: false, msg: '还没轮到你，不能出牌' };
+  return { ok: true };
+}
+
 io.on('connection', (socket) => {
   console.log('玩家加入: ' + socket.id);
 
@@ -196,36 +217,81 @@ io.on('connection', (socket) => {
     playerIds.push(socket.id);
   }
 
-  // 连接变化统一重算（可能自动开局/结算）
   recomputePhaseAndMaybeEndOrStart();
 
-  // 单播给新玩家（避免首帧丢失）
+  // 单播给新玩家，避免首帧丢失
   socket.emit('gameState', buildState());
 
   socket.on('requestState', () => {
     socket.emit('gameState', buildState());
   });
 
-  // --- 新增：打出卡牌（目前只实现“跳过”） ---
-  socket.on('playCard', ({ card }) => {
-    if (phase !== 'playing') return;
-    if (defusingPlayerId) return; // 拆弹过程中禁止出牌
-    if (socket.id !== playerIds[currentTurnIndex]) return;
-    if (!players[socket.id] || players[socket.id].isDead) return;
+  // 出牌：跳过 / 克隆牌
+  socket.on('playCard', ({ card } = {}) => {
+    const v = validateCanPlayActiveCard(socket);
+    if (!v.ok) {
+      socket.emit('errorMsg', { message: v.msg });
+      return;
+    }
 
-    if (card !== '跳过') return;
+    if (!card) {
+      socket.emit('errorMsg', { message: '出牌参数错误：缺少 card' });
+      return;
+    }
 
     const hand = players[socket.id].hand;
-    const idx = hand.indexOf('跳过');
-    if (idx === -1) return;
 
-    // 消耗一张跳过
-    hand.splice(idx, 1);
+    // --- 跳过 ---
+    if (card === '跳过') {
+      const idx = hand.indexOf('跳过');
+      if (idx === -1) {
+        socket.emit('errorMsg', { message: '你没有【跳过】牌' });
+        return;
+      }
 
-    io.emit('cardPlayed', { id: socket.id, card: '跳过' });
+      hand.splice(idx, 1);
+      discard('跳过');
 
-    // 跳过：直接切回合，不抽牌
-    nextTurn();
+      io.emit('cardPlayed', { id: socket.id, card: '跳过' });
+
+      nextTurn();
+      return;
+    }
+
+    // --- 克隆牌 ---
+    if (card === '克隆牌') {
+      const idx = hand.indexOf('克隆牌');
+      if (idx === -1) {
+        socket.emit('errorMsg', { message: '你没有【克隆牌】' });
+        return;
+      }
+
+      const top = discardTop();
+      if (!top) {
+        socket.emit('errorMsg', { message: '弃牌堆为空，无法克隆' });
+        return;
+      }
+
+      // 本版本：只支持克隆“跳过”的效果（因为这是你目前唯一主动技能牌）
+      if (top !== '跳过') {
+        socket.emit('errorMsg', { message: `弃牌堆顶牌为【${top}】，当前不可克隆其效果` });
+        return;
+      }
+
+      // 先消耗克隆牌，再把克隆牌放进弃牌堆
+      // 注意：克隆目标已在上面读取，避免“克隆自己”
+      hand.splice(idx, 1);
+      discard('克隆牌');
+
+      // 广播：克隆了谁（客户端可显示更丰富提示）
+      io.emit('cardPlayed', { id: socket.id, card: '克隆牌', clonedCard: top });
+
+      // 执行克隆效果：等同于打出“跳过”
+      nextTurn();
+      return;
+    }
+
+    socket.emit('errorMsg', { message: `暂不支持此卡牌：${card}` });
   });
 
   // 抽牌
@@ -234,7 +300,7 @@ io.on('connection', (socket) => {
       socket.emit('errorMsg', { message: '需要至少 2 名玩家且游戏进行中才能抽牌' });
       return;
     }
-    if (defusingPlayerId) return; // 拆弹过程中禁止抽牌
+    if (defusingPlayerId) return;
     if (socket.id !== playerIds[currentTurnIndex]) return;
     if (!players[socket.id] || players[socket.id].isDead) return;
 
@@ -251,8 +317,11 @@ io.on('connection', (socket) => {
       const defuseIndex = player.hand.indexOf('拆除');
 
       if (defuseIndex !== -1) {
-        // 有拆除：消耗拆除，进入“拆弹态”
+        // 消耗拆除 -> 进入弃牌堆
         player.hand.splice(defuseIndex, 1);
+        discard('拆除');
+
+        // 进入拆弹态
         defusingPlayerId = socket.id;
 
         broadcastState();
@@ -260,24 +329,24 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // 没拆除：死亡
+      // 没拆除：死亡，炸弹进入弃牌堆（用于可视化爆炸）
       player.isDead = true;
+      discard('炸弹');
+
       io.emit('playerDied', { id: socket.id });
 
-      // 死亡后立刻重新判定是否结束
       recomputePhaseAndMaybeEndOrStart();
 
-      // 如果未结束且仍在 playing，切回合
       if (phase === 'playing') nextTurn();
       return;
     }
 
-    // 普通牌
+    // 非炸弹：入手
     players[socket.id].hand.push(card);
     nextTurn();
   });
 
-  // 塞炸弹（仅允许“正在拆弹”的那个玩家执行）
+  // 塞炸弹
   socket.on('insertBomb', ({ index, isPublic }) => {
     if (phase !== 'playing') return;
     if (socket.id !== playerIds[currentTurnIndex]) return;
@@ -298,9 +367,7 @@ io.on('connection', (socket) => {
 
     io.emit('bombInserted');
 
-    // 插完也重算一次（防极端状态）
     recomputePhaseAndMaybeEndOrStart();
-
     if (phase === 'playing') nextTurn();
   });
 
@@ -327,13 +394,11 @@ io.on('connection', (socket) => {
     delete players[socket.id];
     playerIds = playerIds.filter(id => id !== socket.id);
 
-    // 断线后如果正是拆弹玩家，清除拆弹态（否则会锁死）
     if (defusingPlayerId === socket.id) {
       defusingPlayerId = null;
       topCardPublic = null;
     }
 
-    // 断线也立即判定阶段/结算
     recomputePhaseAndMaybeEndOrStart();
   });
 });
