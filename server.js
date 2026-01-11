@@ -166,7 +166,7 @@ function dealStartingHandToPlayer(playerId) {
   for (let i = 0; i < 6; i++) {
     const c = drawNonBombFromDeck();
     if (c) hand.push(c);
-    else break; // 牌堆真的不够（理论上不应该），就先发到这
+    else break;
   }
 
   players[playerId].hand = hand;
@@ -330,6 +330,8 @@ function startNewRound() {
     if (!players[id]) continue;
     dealStartingHandToPlayer(id);
   }
+
+  shuffleArrayInPlace(deck);
 
   const alive = getAlivePlayers();
   if (alive.length === 0) {
@@ -498,34 +500,23 @@ function resolveActiveEffect(actorId, effectCard) {
   broadcastState();
 }
 
-// 创建可阻止动作
-function createPendingAction(payload) {
-  const startedAt = Date.now();
-  pendingAction = {
-    ...payload,
-    nopeCount: 0,
-    startedAt,
-    resolveAt: startedAt + NOPE_WINDOW_MS
-  };
-
-  io.emit('actionPending', {
-    actorId: pendingAction.actorId,
-    displayCard: pendingAction.displayCard,
-    effectCard: pendingAction.effectCard,
-    clonedCard: pendingAction.clonedCard || null,
-    nopeCount: 0,
-    resolveAt: pendingAction.resolveAt,
-    pairCard: pendingAction.pairCard || null,
-    targetId: pendingAction.targetId || null
-  });
-
-  broadcastState();
-
-  pendingActionTimer = setTimeout(() => {
-    const pa = pendingAction;
+/**
+ * 关键新增：统一调度 pendingAction 的计时器
+ * - 支持“每次打出阻止，都重置 resolveAt，从而让阻止也有 pending 时间”
+ */
+function schedulePendingResolution() {
+  if (pendingActionTimer) {
+    clearTimeout(pendingActionTimer);
     pendingActionTimer = null;
-    pendingAction = null;
+  }
+  if (!pendingAction) return;
 
+  const delay = Math.max(0, pendingAction.resolveAt - Date.now());
+  pendingActionTimer = setTimeout(() => {
+    pendingActionTimer = null;
+
+    const pa = pendingAction;
+    pendingAction = null;
     if (!pa) return;
 
     const cancelled = (pa.nopeCount % 2 === 1);
@@ -574,14 +565,39 @@ function createPendingAction(payload) {
     // 其他牌照旧
     resolveActiveEffect(pa.actorId, pa.effectCard);
     broadcastState();
-  }, NOPE_WINDOW_MS);
+  }, delay);
+}
+
+// 创建可阻止动作
+function createPendingAction(payload) {
+  const startedAt = Date.now();
+  pendingAction = {
+    ...payload,
+    nopeCount: 0,
+    startedAt,
+    resolveAt: startedAt + NOPE_WINDOW_MS
+  };
+
+  io.emit('actionPending', {
+    actorId: pendingAction.actorId,
+    displayCard: pendingAction.displayCard,
+    effectCard: pendingAction.effectCard,
+    clonedCard: pendingAction.clonedCard || null,
+    nopeCount: pendingAction.nopeCount,
+    resolveAt: pendingAction.resolveAt,
+    pairCard: pendingAction.pairCard || null,
+    targetId: pendingAction.targetId || null
+  });
+
+  broadcastState();
+  schedulePendingResolution();
 }
 
 // ---------------- Socket ----------------
 io.on('connection', (socket) => {
   console.log('玩家加入: ' + socket.id);
 
-  // 新玩家注册（手牌先空，等发牌逻辑处理）
+  // 新玩家注册
   players[socket.id] = {
     id: socket.id,
     hand: [],
@@ -590,10 +606,8 @@ io.on('connection', (socket) => {
 
   if (!playerIds.includes(socket.id)) playerIds.push(socket.id);
 
-  // 如果当前正在游戏中：新加入的人也要按规则发 6+1 拆除
-  // 注意：这会让系统总拆除变为 (当前人数+3)，符合你描述“每个新加进来的用户都额外一张拆除”
+  // 如果当前正在游戏中：新加入的人也按规则发 6+1 拆除
   if (phase === 'playing') {
-    // 如果牌堆还没初始化（极端情况），先建一副
     if (deck.length === 0) deck = buildDeckBySpec();
     dealStartingHandToPlayer(socket.id);
   }
@@ -620,7 +634,7 @@ io.on('connection', (socket) => {
     broadcastState();
   });
 
-  // 阻止（非自己回合可用）
+  // ---------------- 改动点：阻止也有 pending 时间（可被阻止） ----------------
   socket.on('playNope', () => {
     const v = validateCanPlayNope(socket);
     if (!v.ok) {
@@ -635,15 +649,33 @@ io.on('connection', (socket) => {
       return;
     }
 
+    // 消耗阻止
     hand.splice(idx, 1);
     discard('阻止');
 
+    // 计数 +1
     pendingAction.nopeCount += 1;
+
+    // 关键：每次打出阻止，都重置 pending 窗口，让别人有时间阻止这个阻止
+    pendingAction.resolveAt = Date.now() + NOPE_WINDOW_MS;
 
     io.emit('cardPlayed', { id: socket.id, card: '阻止' });
     io.emit('nopePlayed', { id: socket.id, nopeCount: pendingAction.nopeCount });
 
+    // 广播一次 actionPending（更新前端倒计时）
+    io.emit('actionPending', {
+      actorId: pendingAction.actorId,
+      displayCard: pendingAction.displayCard,
+      effectCard: pendingAction.effectCard,
+      clonedCard: pendingAction.clonedCard || null,
+      nopeCount: pendingAction.nopeCount,
+      resolveAt: pendingAction.resolveAt,
+      pairCard: pendingAction.pairCard || null,
+      targetId: pendingAction.targetId || null
+    });
+
     broadcastState();
+    schedulePendingResolution();
   });
 
   // 出牌（回合内）
