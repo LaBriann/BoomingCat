@@ -28,7 +28,7 @@ let currentTurnsLeft = 1;
 
 const MIN_PLAYERS = 2;
 
-// 角色牌替换普通牌
+// 角色牌（成对牌）
 const CHARACTER_CARDS = ['海绵爸爸', '派小星', '章鱼弟'];
 
 // --- 阻止机制：待结算动作（可被阻止） ---
@@ -46,35 +46,6 @@ function shuffleArrayInPlace(arr) {
     const j = Math.floor(Math.random() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
-}
-
-function randomOne(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
-function getStartingHand() {
-  return ['拆除', '拆除', randomOne(CHARACTER_CARDS)];
-}
-
-function shuffleDeckNewRound() {
-  const cards = [
-    '炸弹', '炸弹', '炸弹', '炸弹',
-    '拆除', '拆除',
-    '跳过', '跳过',
-    '攻击', '攻击',
-    '预知', '预知',
-    '克隆牌', '克隆牌',
-    '底抽', '底抽',
-    '洗混', '洗混',
-    '阻止', '阻止', '阻止',
-
-    // 角色牌（数量可自行调整）
-    '海绵爸爸', '海绵爸爸',
-    '派小星', '派小星',
-    '章鱼弟', '章鱼弟',
-  ];
-  shuffleArrayInPlace(cards);
-  return cards;
 }
 
 function discard(card) {
@@ -126,6 +97,82 @@ function clearPendingAction(reason = null) {
   if (reason) io.emit('actionResolved', { cancelled: true, reason });
 }
 
+// ---------------- 新的牌库配置 ----------------
+// 18 张成对牌（每类 6 张），6 阻止，3 拆除，5 炸弹，其他功能牌各 6 张
+function buildDeckBySpec() {
+  const cards = [];
+
+  // 成对牌：每类 6 张
+  for (const c of CHARACTER_CARDS) {
+    for (let i = 0; i < 6; i++) cards.push(c);
+  }
+
+  // 阻止 6
+  for (let i = 0; i < 6; i++) cards.push('阻止');
+
+  // 拆除 3（另外每位玩家开局额外拿 1 张 => 总拆除 = n + 3）
+  for (let i = 0; i < 3; i++) cards.push('拆除');
+
+  // 炸弹 5
+  for (let i = 0; i < 5; i++) cards.push('炸弹');
+
+  // 底抽 6
+  for (let i = 0; i < 6; i++) cards.push('底抽');
+
+  // 克隆 6
+  for (let i = 0; i < 6; i++) cards.push('克隆牌');
+
+  // 预知 6
+  for (let i = 0; i < 6; i++) cards.push('预知');
+
+  // 攻击 6
+  for (let i = 0; i < 6; i++) cards.push('攻击');
+
+  // 跳过 6
+  for (let i = 0; i < 6; i++) cards.push('跳过');
+
+  shuffleArrayInPlace(cards);
+  return cards;
+}
+
+// 从牌堆“抽一张非炸弹”（顶端 pop 方式；如果抽到炸弹就放到底部并继续找）
+function drawNonBombFromDeck() {
+  if (deck.length === 0) return null;
+
+  let attempts = 0;
+  const maxAttempts = deck.length;
+
+  while (attempts < maxAttempts && deck.length > 0) {
+    const c = deck.pop(); // 牌顶
+    if (c !== '炸弹') return c;
+
+    // 抽到了炸弹：放到底部（unshift）
+    deck.unshift(c);
+    attempts++;
+  }
+  return null;
+}
+
+// 给某个玩家发：随机 6 张（不含炸弹）+ 额外 1 张拆除
+function dealStartingHandToPlayer(playerId) {
+  if (!players[playerId]) return;
+
+  const hand = [];
+
+  // 额外拆除（保证每人至少有 1 张拆除）
+  hand.push('拆除');
+
+  // 再发 6 张随机牌（不包含炸弹）
+  for (let i = 0; i < 6; i++) {
+    const c = drawNonBombFromDeck();
+    if (c) hand.push(c);
+    else break; // 牌堆真的不够（理论上不应该），就先发到这
+  }
+
+  players[playerId].hand = hand;
+  players[playerId].isDead = false;
+}
+
 // ---- 隐私：只广播公共信息 + 自己手牌 ----
 function buildPublicPlayers() {
   const obj = {};
@@ -140,7 +187,7 @@ function buildPublicPlayers() {
   return obj;
 }
 
-// ---- 关键修复：由服务端下发 isMyTurn ----
+// ---- 由服务端下发 isMyTurn ----
 function buildStateForPlayer(viewerId) {
   const currentTurn =
     (phase === 'playing' && playerIds[currentTurnIndex])
@@ -263,8 +310,9 @@ function recomputePhaseAndMaybeEndOrStart() {
   broadcastState();
 }
 
+// ---------------- 新开局（按新发牌规则） ----------------
 function startNewRound() {
-  deck = shuffleDeckNewRound();
+  deck = buildDeckBySpec();
   topCardPublic = null;
   discardPile = [];
 
@@ -277,10 +325,10 @@ function startNewRound() {
 
   clearPendingAction(null);
 
+  // 给所有玩家发：6 随机 + 1 拆除
   for (const id of playerIds) {
     if (!players[id]) continue;
-    players[id].isDead = false;
-    players[id].hand = getStartingHand();
+    dealStartingHandToPlayer(id);
   }
 
   const alive = getAlivePlayers();
@@ -515,13 +563,8 @@ function createPendingAction(payload) {
       const stolen = targetHand.splice(idx, 1)[0];
       players[actorId].hand.push(stolen);
 
-      // 对外不公开抽到什么
       io.emit('pairSteal', { actorId, targetId, success: true });
-
-      // 只给抽取者显示具体牌
       emitToPlayer(actorId, 'stolenCard', { card: stolen });
-
-      // 目标提示（不含具体牌名）
       emitToPlayer(targetId, 'stolenFromYou', { by: actorId });
 
       broadcastState();
@@ -538,13 +581,22 @@ function createPendingAction(payload) {
 io.on('connection', (socket) => {
   console.log('玩家加入: ' + socket.id);
 
+  // 新玩家注册（手牌先空，等发牌逻辑处理）
   players[socket.id] = {
     id: socket.id,
-    hand: getStartingHand(),
+    hand: [],
     isDead: false
   };
 
   if (!playerIds.includes(socket.id)) playerIds.push(socket.id);
+
+  // 如果当前正在游戏中：新加入的人也要按规则发 6+1 拆除
+  // 注意：这会让系统总拆除变为 (当前人数+3)，符合你描述“每个新加进来的用户都额外一张拆除”
+  if (phase === 'playing') {
+    // 如果牌堆还没初始化（极端情况），先建一副
+    if (deck.length === 0) deck = buildDeckBySpec();
+    dealStartingHandToPlayer(socket.id);
+  }
 
   recomputePhaseAndMaybeEndOrStart();
   sendStateTo(socket.id);
@@ -672,7 +724,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  // 角色牌两张成对打出 -> 抽取目标 1 张牌（不公开目标手牌）
+  // 角色牌两张成对打出 -> 抽取目标 1 张牌
   socket.on('playPair', ({ card, targetId } = {}) => {
     const v = validateCanPlayTurnAction(socket);
     if (!v.ok) {
@@ -715,13 +767,12 @@ io.on('connection', (socket) => {
     hand.splice(indices[0], 1);
     hand.splice(indices[1], 1);
 
-    // 两张都弃置（即使被阻止也会弃置，符合你的规则）
+    // 两张都弃置（即使被阻止也弃置）
     discard(card);
     discard(card);
 
     io.emit('cardPlayed', { id: socket.id, card: `${card}×2` });
 
-    // 可被阻止的待结算动作
     createPendingAction({
       actorId: socket.id,
       displayCard: `${card}×2`,
