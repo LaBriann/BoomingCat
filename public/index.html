@@ -10,11 +10,7 @@
   <style>
     body { background: #222; overflow: hidden; font-family: sans-serif; margin: 0; user-select: none; }
 
-    .scene {
-      perspective: 1000px;
-      width: 100vw; height: 100vh;
-      display: flex; justify-content: center; align-items: center;
-    }
+    .scene { perspective: 1000px; width: 100vw; height: 100vh; display: flex; justify-content: center; align-items: center; }
 
     .table {
       width: 90vw; height: 60vh; max-width: 800px;
@@ -25,10 +21,16 @@
     }
 
     .info-text {
-      position: absolute; top: -60px; width: 100%;
+      position: absolute; top: -72px; width: 100%;
       text-align: center; color: white;
       font-size: 18px; text-shadow: 0 2px 4px black;
       transform: translateZ(20px);
+    }
+
+    .pending-banner {
+      margin-top: 6px;
+      font-size: 13px;
+      color: #ffca28;
     }
 
     .draw-pile {
@@ -60,53 +62,25 @@
       100% { transform: translate(-50%, -50%) translateZ(20px) scale(1.1); }
     }
 
-    /* 弃牌堆 */
     .discard-pile {
-      position: absolute;
-      top: 50%;
-      left: 25%;
-      width: 90px;
-      height: 125px;
-      background: #607d8b;
-      border: 4px solid white;
-      border-radius: 8px;
+      position: absolute; top: 50%; left: 25%;
+      width: 90px; height: 125px;
+      background: #607d8b; border: 4px solid white; border-radius: 8px;
       transform: translate(-50%, -50%) translateZ(2px);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      color: white;
-      font-weight: bold;
+      display: flex; justify-content: center; align-items: center;
+      color: white; font-weight: bold;
       box-shadow: 5px 5px 15px rgba(0,0,0,0.5);
       user-select: none;
     }
-
-    .discard-pile .count {
-      position: absolute;
-      bottom: 10px;
-      font-size: 12px;
-      font-weight: normal;
-      opacity: 0.95;
-    }
-
-    .discard-pile .topIcon {
-      font-size: 34px;
-      line-height: 1;
-    }
-
-    .discard-pile .topText {
-      position: absolute;
-      top: 8px;
-      font-size: 12px;
-      font-weight: normal;
-      opacity: 0.95;
-    }
+    .discard-pile .count { position: absolute; bottom: 10px; font-size: 12px; font-weight: normal; opacity: 0.95; }
+    .discard-pile .topIcon { font-size: 34px; line-height: 1; }
+    .discard-pile .topText { position: absolute; top: 8px; font-size: 12px; font-weight: normal; opacity: 0.95; }
 
     .my-hand {
       position: absolute; bottom: 30px; width: 100%;
       display: flex; justify-content: center; gap: 10px;
       transform: translateZ(50px);
-      flex-wrap: wrap;
-      padding: 0 10px;
+      flex-wrap: wrap; padding: 0 10px;
     }
 
     .card {
@@ -115,7 +89,6 @@
       font-weight: bold; box-shadow: 2px 2px 5px rgba(0,0,0,0.3); font-size: 14px;
       transition: 0.2s;
     }
-
     .card:hover { transform: translateY(-20px); }
 
     .card.defuse { background: #b9f6ca; color: #1b5e20; border: 2px solid #00c853; }
@@ -150,24 +123,11 @@
     }
     input[type=checkbox] { width: 20px; height: 20px; accent-color: #ff5252; cursor: pointer;}
 
-    /* 预知卡牌展示 */
-    .preview-row {
-      display: flex;
-      gap: 12px;
-      margin-top: 20px;
-      flex-wrap: wrap;
-      justify-content: center;
-    }
+    .preview-row { display:flex; gap:12px; margin-top:20px; flex-wrap:wrap; justify-content:center; }
     .preview-card {
-      width: 90px;
-      height: 130px;
-      border-radius: 10px;
-      background: rgba(255,255,255,0.12);
-      border: 1px solid rgba(255,255,255,0.25);
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
+      width: 90px; height: 130px; border-radius: 10px;
+      background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.25);
+      display:flex; flex-direction:column; justify-content:center; align-items:center;
       box-shadow: 0 10px 30px rgba(0,0,0,0.35);
     }
     .preview-card .icon { font-size: 40px; margin-bottom: 10px; }
@@ -271,7 +231,11 @@
           🟢 轮到你了（剩余回合：{{ turnsLeftForCurrent }}）
         </div>
         <div v-else>
-          🔴 等待对手...（对手剩余回合：{{ turnsLeftForCurrent }}）
+          🔴 等待对手...（当前玩家剩余回合：{{ turnsLeftForCurrent }}）
+        </div>
+
+        <div class="pending-banner" v-if="pendingAction">
+          ⏳ 待结算：{{ pendingActionText }} ｜阻止次数：{{ pendingAction.nopeCount }} ｜剩余：{{ pendingMsLeft }}ms
         </div>
 
         <div v-if="lastActionMsg" style="font-size:14px; color: #ffca28; margin-top:5px;">
@@ -279,7 +243,7 @@
         </div>
       </div>
 
-      <!-- 弃牌堆（图标版） -->
+      <!-- 弃牌堆 -->
       <div class="discard-pile" :title="discardTopCard ? ('顶牌：' + discardTopCard) : '弃牌堆为空'">
         <div class="topText">弃牌堆</div>
         <div class="topIcon">{{ cardIcon(discardTopCard) }}</div>
@@ -310,9 +274,9 @@
           class="card"
           :class="{
             'defuse': card === '拆除',
-            'playable': canPlayActiveCard && isActiveCard(card)
+            'playable': isCardPlayable(card)
           }"
-          @click="isActiveCard(card) ? playActiveCard(card) : null"
+          @click="onCardClick(card)"
           :title="cardHelp(card)"
         >
           {{ card }}
@@ -325,7 +289,7 @@
 </div>
 
 <script>
-  const { createApp, ref, computed } = Vue;
+  const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
   const socket = io();
 
   createApp({
@@ -349,20 +313,20 @@
       const isWinner = ref(false);
       const winReasonText = ref('');
 
-      // 弃牌堆
       const discardCount = ref(0);
       const discardTopCard = ref(null);
 
-      // 攻击可视化：当前玩家还剩回合数
       const turnsLeftForCurrent = ref(0);
 
-      // 预知弹窗
       const isPreviewing = ref(false);
       const previewCards = ref([]);
 
-      const activeCards = ['跳过', '攻击', '预知', '克隆牌'];
+      const pendingAction = ref(null);
+      const pendingMsLeft = ref(0);
+      let msTimer = null;
 
-      const isActiveCard = (card) => activeCards.includes(card);
+      const activeTurnCards = ['跳过', '攻击', '预知', '克隆牌'];
+      const nopeCard = '阻止';
 
       const cardIcon = (card) => {
         switch (card) {
@@ -372,18 +336,18 @@
           case '攻击': return '⚔️';
           case '预知': return '👁️';
           case '克隆牌': return '🧬';
+          case '阻止': return '✋';
           case '普通牌': return '🟦';
-          case null:
-          case undefined:
           default: return '—';
         }
       };
 
       const cardHelp = (card) => {
-        if (card === '跳过') return '跳过：结束本回合（不抽牌）';
-        if (card === '攻击') return '攻击：你不抽牌，强制下家连走两回合（可叠加）';
-        if (card === '预知') return '预知：查看牌顶三张（不结束回合）';
-        if (card === '克隆牌') return '克隆牌：克隆弃牌堆顶牌效果（支持：跳过/攻击/预知）';
+        if (card === '跳过') return '跳过：结束本回合（不抽牌）（可被阻止）';
+        if (card === '攻击') return '攻击：结束当前回合并让下家总共 2 回合（可叠加）（可被阻止）';
+        if (card === '预知') return '预知：查看牌顶三张（可被阻止）';
+        if (card === '克隆牌') return '克隆牌：克隆弃牌堆顶牌效果（支持：跳过/攻击/预知）（可被阻止）';
+        if (card === '阻止') return '阻止：可在非自己回合使用，使待结算动作失效（阻止可被阻止）';
         return '';
       };
 
@@ -420,12 +384,12 @@
 
         turnsLeftForCurrent.value = data.turnsLeftForCurrent ?? 0;
 
+        pendingAction.value = data.pendingAction ?? null;
+
         if (myId.value && data.players && data.players[myId.value]) {
           const me = data.players[myId.value];
           myHand.value = me.hand;
           amIDead.value = me.isDead;
-        } else {
-          if (socket.connected) socket.emit('requestState');
         }
 
         if (phase.value === 'ended') {
@@ -449,23 +413,30 @@
         isPreviewing.value = true;
       });
 
-      socket.on('playerDied', (data) => {
-        if (data.id !== socket.id) lastActionMsg.value = "💥 对手炸了！";
-      });
-
-      socket.on('bombInserted', () => {
-        lastActionMsg.value = "👀 炸弹已被埋回...";
-      });
-
       socket.on('cardPlayed', (data) => {
         if (!data) return;
         const actor = (data.id === socket.id) ? '你' : '对手';
-
         if (data.card === '克隆牌' && data.clonedCard) {
-          lastActionMsg.value = `🧬 ${actor} 使用了【克隆牌】，克隆【${data.clonedCard}】效果`;
+          lastActionMsg.value = `🧬 ${actor} 使用【克隆牌】，目标【${data.clonedCard}】`;
         } else {
-          lastActionMsg.value = `🃏 ${actor} 使用了【${data.card}】`;
+          lastActionMsg.value = `🃏 ${actor} 使用【${data.card}】`;
         }
+      });
+
+      socket.on('nopePlayed', (data) => {
+        if (!data) return;
+        const actor = (data.id === socket.id) ? '你' : '对手';
+        lastActionMsg.value = `✋ ${actor} 打出了【阻止】（次数：${data.nopeCount}）`;
+      });
+
+      socket.on('actionPending', (data) => {
+        // 可选：提示
+      });
+
+      socket.on('actionResolved', (data) => {
+        if (!data) return;
+        if (data.cancelled) lastActionMsg.value = `🚫 动作失效：${data.reason || '已被阻止'}`;
+        else lastActionMsg.value = `✅ 动作生效`;
       });
 
       socket.on('gameOver', (data) => {
@@ -486,6 +457,9 @@
         isPreviewing.value = false;
         previewCards.value = [];
 
+        pendingAction.value = null;
+        pendingMsLeft.value = 0;
+
         socket.emit('requestState');
       });
 
@@ -499,12 +473,48 @@
           && !amIDead.value;
       });
 
-      const canPlayActiveCard = computed(() => {
+      const canPlayTurnCard = computed(() => {
         return phase.value === 'playing'
           && !isGameOver.value
           && !amIDead.value
           && isMyTurn.value
-          && !isDefusing.value;
+          && !isDefusing.value
+          && !pendingAction.value; // 有待结算动作时不能再打其他牌
+      });
+
+      const canPlayNope = computed(() => {
+        return phase.value === 'playing'
+          && !isGameOver.value
+          && !amIDead.value
+          && !isDefusing.value
+          && !!pendingAction.value
+          && myHand.value.includes(nopeCard);
+      });
+
+      const pendingActionText = computed(() => {
+        if (!pendingAction.value) return '';
+        const pa = pendingAction.value;
+        if (pa.displayCard === '克隆牌' && pa.clonedCard) {
+          return `克隆牌 → ${pa.effectCard}`;
+        }
+        return `${pa.displayCard}`;
+      });
+
+      function tickMsLeft() {
+        if (!pendingAction.value || !pendingAction.value.resolveAt) {
+          pendingMsLeft.value = 0;
+          return;
+        }
+        const left = pendingAction.value.resolveAt - Date.now();
+        pendingMsLeft.value = Math.max(0, Math.floor(left));
+      }
+
+      onMounted(() => {
+        msTimer = setInterval(tickMsLeft, 100);
+      });
+
+      onUnmounted(() => {
+        if (msTimer) clearInterval(msTimer);
       });
 
       const insertPositionText = computed(() => {
@@ -516,19 +526,37 @@
 
       const drawCard = () => {
         if (phase.value !== 'playing') return;
+        if (pendingAction.value) {
+          lastActionMsg.value = "⚠️ 有待结算动作，先等结算/使用阻止";
+          return;
+        }
         if (isMyTurn.value && !isDefusing.value) socket.emit('drawCard');
       };
 
-      const playActiveCard = (card) => {
-        if (!myHand.value.includes(card)) {
-          lastActionMsg.value = `⚠️ 你没有【${card}】`;
+      const onCardClick = (card) => {
+        if (card === '阻止') {
+          if (!canPlayNope.value) {
+            lastActionMsg.value = "⚠️ 当前不能使用阻止（无待结算动作/你已死亡/拆弹中等）";
+            return;
+          }
+          socket.emit('playNope');
           return;
         }
-        if (!canPlayActiveCard.value) {
-          lastActionMsg.value = "⚠️ 当前不能出牌（非你回合/拆弹中/未开局/已结束）";
+
+        if (!activeTurnCards.includes(card)) return;
+
+        if (!canPlayTurnCard.value) {
+          lastActionMsg.value = "⚠️ 当前不能出牌（非你回合/拆弹中/有待结算动作/已结束）";
           return;
         }
+
         socket.emit('playCard', { card });
+      };
+
+      const isCardPlayable = (card) => {
+        if (card === '阻止') return canPlayNope.value;
+        if (activeTurnCards.includes(card)) return canPlayTurnCard.value;
+        return false;
       };
 
       const closePreview = () => {
@@ -560,9 +588,13 @@
 
         isPreviewing, previewCards, closePreview,
 
-        isMyTurn, canPlayActiveCard, isActiveCard, cardHelp,
+        isMyTurn,
 
-        drawCard, playActiveCard, confirmInsert, requestRestart
+        pendingAction, pendingActionText, pendingMsLeft,
+
+        drawCard, onCardClick, isCardPlayable, cardHelp,
+
+        confirmInsert, requestRestart
       };
     }
   }).mount('#app');
