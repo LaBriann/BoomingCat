@@ -34,7 +34,7 @@ const CHARACTER_CARDS = ['海绵爸爸', '派小星', '章鱼弟'];
 // --- 阻止机制：待结算动作（可被阻止） ---
 let pendingAction = null;
 let pendingActionTimer = null;
-const NOPE_WINDOW_MS = 2000;
+const NOPE_WINDOW_MS = 5000;
 
 // --- 聊天 ---
 const CHAT_MAX = 80;
@@ -130,6 +130,9 @@ function buildDeckBySpec() {
 
   // 跳过 6
   for (let i = 0; i < 6; i++) cards.push('跳过');
+
+
+  for (let i = 0; i < 6; i++) cards.push('洗混');
 
   shuffleArrayInPlace(cards);
   return cards;
