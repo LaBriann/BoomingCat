@@ -9,9 +9,7 @@
 
   <style>
     body { background: #222; overflow: hidden; font-family: sans-serif; margin: 0; user-select: none; }
-
     .scene { perspective: 1000px; width: 100vw; height: 100vh; display: flex; justify-content: center; align-items: center; }
-
     .table {
       width: 90vw; height: 60vh; max-width: 800px;
       background: #2c3e50; border: 8px solid #5d4037; border-radius: 20px;
@@ -19,19 +17,13 @@
       transform-style: preserve-3d; position: relative;
       box-shadow: 0 50px 50px rgba(0,0,0,0.5);
     }
-
     .info-text {
       position: absolute; top: -72px; width: 100%;
       text-align: center; color: white;
       font-size: 18px; text-shadow: 0 2px 4px black;
       transform: translateZ(20px);
     }
-
-    .pending-banner {
-      margin-top: 6px;
-      font-size: 13px;
-      color: #ffca28;
-    }
+    .pending-banner { margin-top: 6px; font-size: 13px; color: #ffca28; }
 
     .draw-pile {
       position: absolute; top: 50%; left: 50%;
@@ -44,18 +36,15 @@
       cursor: pointer; box-shadow: 5px 5px 15px rgba(0,0,0,0.5);
       transition: 0.3s;
     }
-
     .my-turn-glow {
       box-shadow: 0 0 30px #00e676; border-color: #00e676;
       transform: translate(-50%, -50%) translateZ(20px) scale(1.1);
     }
-
     .draw-pile.is-bomb {
       background: #ff5252;
       border-color: #ff8a80;
       animation: pulse 1s infinite;
     }
-
     @keyframes pulse {
       0% { transform: translate(-50%, -50%) translateZ(20px) scale(1.1); }
       50% { transform: translate(-50%, -50%) translateZ(20px) scale(1.15); }
@@ -82,7 +71,6 @@
       transform: translateZ(50px);
       flex-wrap: wrap; padding: 0 10px;
     }
-
     .card {
       width: 70px; height: 100px; background: white; border-radius: 6px;
       display: flex; justify-content: center; align-items: center;
@@ -90,9 +78,7 @@
       transition: 0.2s;
     }
     .card:hover { transform: translateY(-20px); }
-
     .card.defuse { background: #b9f6ca; color: #1b5e20; border: 2px solid #00c853; }
-
     .card.playable {
       border: 2px solid #00e676;
       box-shadow: 0 0 12px rgba(0, 230, 118, 0.7);
@@ -105,17 +91,14 @@
       display: flex; flex-direction: column; justify-content: center; align-items: center;
       color: white;
     }
-
     .slider-container { width: 80%; max-width: 400px; margin: 30px 0; text-align: center; }
     input[type=range] { width: 100%; height: 20px; accent-color: #ff9800; cursor: pointer; }
-
     .confirm-btn {
       padding: 15px 40px; font-size: 18px; background: #ff5252; color: white;
       border: none; border-radius: 50px; cursor: pointer; font-weight: bold;
       box-shadow: 0 0 20px #ff5252; margin-top: 20px;
     }
     .confirm-btn:active { transform: scale(0.95); }
-
     .checkbox-wrapper {
       margin-top: 15px; display: flex; align-items: center; justify-content: center; gap: 10px;
       background: rgba(255, 255, 255, 0.1); padding: 10px 20px; border-radius: 20px;
@@ -183,8 +166,7 @@
 
     <button class="confirm-btn"
             style="background:#00e676; box-shadow:0 0 20px #00e676;"
-            @click="closePreview"
-    >
+            @click="closePreview">
       知道了
     </button>
   </div>
@@ -260,7 +242,6 @@
         @click="drawCard"
       >
         {{ topCardPublic === '炸弹' ? '☠️' : deckCount }}
-
         <div style="font-size: 12px; position: absolute; bottom: 10px; font-weight: normal;">
           {{ topCardPublic === '炸弹' ? '下张必死' : '点击抽牌' }}
         </div>
@@ -325,7 +306,7 @@
       const pendingMsLeft = ref(0);
       let msTimer = null;
 
-      const activeTurnCards = ['跳过', '攻击', '预知', '克隆牌'];
+      const activeTurnCards = ['跳过', '攻击', '预知', '克隆牌', '底抽', '洗混'];
       const nopeCard = '阻止';
 
       const cardIcon = (card) => {
@@ -337,6 +318,8 @@
           case '预知': return '👁️';
           case '克隆牌': return '🧬';
           case '阻止': return '✋';
+          case '底抽': return '⬇️';
+          case '洗混': return '🔀';
           case '普通牌': return '🟦';
           default: return '—';
         }
@@ -346,8 +329,10 @@
         if (card === '跳过') return '跳过：结束本回合（不抽牌）（可被阻止）';
         if (card === '攻击') return '攻击：结束当前回合并让下家总共 2 回合（可叠加）（可被阻止）';
         if (card === '预知') return '预知：查看牌顶三张（可被阻止）';
-        if (card === '克隆牌') return '克隆牌：克隆弃牌堆顶牌效果（支持：跳过/攻击/预知）（可被阻止）';
+        if (card === '克隆牌') return '克隆牌：克隆弃牌堆顶牌效果（支持：跳过/攻击/预知/底抽/洗混）（可被阻止）';
         if (card === '阻止') return '阻止：可在非自己回合使用，使待结算动作失效（阻止可被阻止）';
+        if (card === '底抽') return '底抽：从牌底抽 1 张，作为本回合抽牌并结束回合（可被阻止）';
+        if (card === '洗混') return '洗混：重新洗混当前剩余牌堆，并关闭明牌（不结束回合）（可被阻止）';
         return '';
       };
 
@@ -429,10 +414,6 @@
         lastActionMsg.value = `✋ ${actor} 打出了【阻止】（次数：${data.nopeCount}）`;
       });
 
-      socket.on('actionPending', (data) => {
-        // 可选：提示
-      });
-
       socket.on('actionResolved', (data) => {
         if (!data) return;
         if (data.cancelled) lastActionMsg.value = `🚫 动作失效：${data.reason || '已被阻止'}`;
@@ -479,7 +460,7 @@
           && !amIDead.value
           && isMyTurn.value
           && !isDefusing.value
-          && !pendingAction.value; // 有待结算动作时不能再打其他牌
+          && !pendingAction.value;
       });
 
       const canPlayNope = computed(() => {
@@ -494,9 +475,7 @@
       const pendingActionText = computed(() => {
         if (!pendingAction.value) return '';
         const pa = pendingAction.value;
-        if (pa.displayCard === '克隆牌' && pa.clonedCard) {
-          return `克隆牌 → ${pa.effectCard}`;
-        }
+        if (pa.displayCard === '克隆牌' && pa.clonedCard) return `克隆牌 → ${pa.effectCard}`;
         return `${pa.displayCard}`;
       });
 
@@ -512,7 +491,6 @@
       onMounted(() => {
         msTimer = setInterval(tickMsLeft, 100);
       });
-
       onUnmounted(() => {
         if (msTimer) clearInterval(msTimer);
       });
@@ -588,9 +566,9 @@
 
         isPreviewing, previewCards, closePreview,
 
-        isMyTurn,
-
         pendingAction, pendingActionText, pendingMsLeft,
+
+        isMyTurn,
 
         drawCard, onCardClick, isCardPlayable, cardHelp,
 

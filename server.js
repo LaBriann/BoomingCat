@@ -13,7 +13,7 @@ let currentTurnIndex = 0;
 let deck = [];
 let topCardPublic = null;
 
-let discardPile = []; // 弃牌堆（已使用/消耗/爆炸的牌）
+let discardPile = []; // 弃牌堆（已使用/消耗/爆炸）
 
 // 游戏阶段
 let phase = 'waiting'; // waiting | playing | ended
@@ -24,29 +24,25 @@ let defusingPlayerId = null;
 
 // 攻击机制：额外回合债务
 let pendingExtraTurns = {}; // { [playerId]: number }
-let currentTurnsLeft = 1;   // 当前玩家还需要完成的回合数（包含本回合）
+let currentTurnsLeft = 1;   // 当前玩家剩余回合数（包含本回合）
 
 const MIN_PLAYERS = 2;
 const STARTING_HAND = ['拆除', '拆除', '普通牌'];
 
-// --- 新增：待结算动作（可被阻止） ---
+// --- 阻止机制：待结算动作（可被阻止） ---
 let pendingAction = null;
-/*
-pendingAction = {
-  actorId: string,
-  displayCard: string,   // 对外显示的打出牌（可能是 克隆牌）
-  effectCard: string,    // 真正要执行效果的牌（跳过/攻击/预知）
-  clonedCard?: string,   // 克隆的目标（若有）
-  nopeCount: number,     // 阻止次数（奇数取消/偶数生效）
-  startedAt: number,     // Date.now()
-  resolveAt: number      // startedAt + windowMs
-}
-*/
 let pendingActionTimer = null;
 const NOPE_WINDOW_MS = 2000;
 
-// --- 工具函数 ---
-function shuffleDeck() {
+// ---------------- 工具函数 ----------------
+function shuffleArrayInPlace(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
+function shuffleDeckNewRound() {
   const cards = [
     '炸弹', '炸弹', '炸弹', '炸弹',
     '拆除', '拆除',
@@ -54,15 +50,12 @@ function shuffleDeck() {
     '攻击', '攻击',
     '预知', '预知',
     '克隆牌', '克隆牌',
-    // 新增：阻止（数量你可调）
+    '底抽', '底抽',
+    '洗混', '洗混',
     '阻止', '阻止', '阻止',
     '普通牌', '普通牌', '普通牌', '普通牌', '普通牌'
   ];
-
-  for (let i = cards.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [cards[i], cards[j]] = [cards[j], cards[i]];
-  }
+  shuffleArrayInPlace(cards);
   return cards;
 }
 
@@ -85,7 +78,6 @@ function emitToPlayer(id, event, payload) {
 
 function getNextAliveIndex(fromIndex) {
   if (playerIds.length === 0) return -1;
-
   for (let step = 1; step <= playerIds.length; step++) {
     const idx = (fromIndex + step) % playerIds.length;
     const pid = playerIds[idx];
@@ -96,16 +88,13 @@ function getNextAliveIndex(fromIndex) {
 
 function setCurrentTurnIndex(idx) {
   currentTurnIndex = idx;
-
   const pid = playerIds[currentTurnIndex];
   if (!pid) {
     currentTurnsLeft = 1;
     return;
   }
-
   const extra = pendingExtraTurns[pid] || 0;
   pendingExtraTurns[pid] = 0;
-
   currentTurnsLeft = 1 + extra;
 }
 
@@ -152,7 +141,6 @@ function buildState() {
 
     turnsLeftForCurrent: (phase === 'playing' && currentTurn) ? currentTurnsLeft : 0,
 
-    // 新增：待结算动作（可阻止）
     pendingAction: pa
   };
 }
@@ -222,7 +210,7 @@ function recomputePhaseAndMaybeEndOrStart() {
 }
 
 function startNewRound() {
-  deck = shuffleDeck();
+  deck = shuffleDeckNewRound();
   topCardPublic = null;
   discardPile = [];
 
@@ -272,7 +260,7 @@ function validateCanPlayNope(socket) {
   return { ok: true };
 }
 
-// 结束“一个回合”（抽牌后、跳过后、攻击后可能触发）
+// 结束一个回合（抽牌后/跳过/攻击/底抽后会调用）
 function endOneTurnOrAdvance() {
   if (phase !== 'playing') return;
 
@@ -304,15 +292,77 @@ function endOneTurnOrAdvance() {
   broadcastState();
 }
 
+// 执行一次抽牌（支持从牌顶/牌底抽）
+function performDraw(playerId, fromBottom = false) {
+  if (phase !== 'playing') return;
+  if (!players[playerId] || players[playerId].isDead) return;
+
+  if (deck.length === 0) {
+    emitToPlayer(playerId, 'errorMsg', { message: '牌库已空，无法抽牌' });
+    return;
+  }
+
+  // 抽牌会关闭明牌（你之前的逻辑）
+  topCardPublic = null;
+
+  const card = fromBottom ? deck.shift() : deck.pop();
+
+  if (card === '炸弹') {
+    const player = players[playerId];
+
+    // 规则：弃牌堆顶是拆除 && 手里有克隆 -> 优先用克隆当拆除
+    const cloneIndex = player.hand.indexOf('克隆牌');
+    const canCloneAsDefuse = (cloneIndex !== -1) && (discardTop() === '拆除');
+    if (canCloneAsDefuse) {
+      player.hand.splice(cloneIndex, 1);
+      discard('克隆牌');
+      io.emit('cardPlayed', { id: playerId, card: '克隆牌', clonedCard: '拆除' });
+
+      defusingPlayerId = playerId;
+      broadcastState();
+      emitToPlayer(playerId, 'askInsertBomb', { maxIndex: deck.length });
+      return;
+    }
+
+    const defuseIndex = player.hand.indexOf('拆除');
+    if (defuseIndex !== -1) {
+      player.hand.splice(defuseIndex, 1);
+      discard('拆除');
+
+      defusingPlayerId = playerId;
+      broadcastState();
+      emitToPlayer(playerId, 'askInsertBomb', { maxIndex: deck.length });
+      return;
+    }
+
+    // 没拆除 -> 死亡
+    player.isDead = true;
+    discard('炸弹');
+
+    io.emit('playerDied', { id: playerId });
+
+    recomputePhaseAndMaybeEndOrStart();
+
+    if (phase === 'playing') {
+      currentTurnsLeft = 0;
+      endOneTurnOrAdvance();
+    }
+    return;
+  }
+
+  // 非炸弹入手并结束一个回合
+  players[playerId].hand.push(card);
+  endOneTurnOrAdvance();
+}
+
 // 执行主动牌效果（最终落地）
-function resolveActiveEffect(actorId, effectCard, socketForErrors) {
+function resolveActiveEffect(actorId, effectCard) {
   if (effectCard === '跳过') {
     endOneTurnOrAdvance();
     return;
   }
 
-  // 攻击（按你上一条修复后的规则）：让下家总共 2 回合 -> pendingExtra +1
-  // 且只结束当前这 1 个回合；若自己被攻击仍要继续完成剩余回合
+  // 攻击：让下家总共 2 回合 => pendingExtra +1，且只结束当前这 1 个回合
   if (effectCard === '攻击') {
     const nextIdx = getNextAliveIndex(currentTurnIndex);
     if (nextIdx === -1) {
@@ -331,19 +381,32 @@ function resolveActiveEffect(actorId, effectCard, socketForErrors) {
     const top3 = [];
     for (let k = 1; k <= 3; k++) {
       const idx = deck.length - k;
-      if (idx >= 0) top3.push(deck[idx]); // 从牌顶开始
+      if (idx >= 0) top3.push(deck[idx]); // 牌顶在数组末尾
     }
     emitToPlayer(actorId, 'previewCards', { cards: top3 });
     broadcastState();
     return;
   }
 
-  if (socketForErrors) {
-    socketForErrors.emit('errorMsg', { message: `未知效果牌：${effectCard}` });
+  // 底抽：从牌底抽 1 张，作为本回合的“抽牌”并结束回合
+  if (effectCard === '底抽') {
+    performDraw(actorId, true);
+    return;
   }
+
+  // 洗混：重新洗混当前剩余牌堆，并关闭明牌；不结束回合
+  if (effectCard === '洗混') {
+    shuffleArrayInPlace(deck);
+    topCardPublic = null;
+    broadcastState();
+    return;
+  }
+
+  // 未知：忽略
+  broadcastState();
 }
 
-// 创建一个可阻止的待结算动作
+// 创建可阻止的待结算动作
 function createPendingAction({ actorId, displayCard, effectCard, clonedCard = null }) {
   const startedAt = Date.now();
   pendingAction = {
@@ -368,7 +431,6 @@ function createPendingAction({ actorId, displayCard, effectCard, clonedCard = nu
   broadcastState();
 
   pendingActionTimer = setTimeout(() => {
-    // 到点结算
     const pa = pendingAction;
     pendingActionTimer = null;
     pendingAction = null;
@@ -383,14 +445,13 @@ function createPendingAction({ actorId, displayCard, effectCard, clonedCard = nu
     }
 
     io.emit('actionResolved', { cancelled: false });
-    // 执行效果
-    resolveActiveEffect(pa.actorId, pa.effectCard, null);
-    // resolveActiveEffect 会 broadcastState（部分情况），保险再广播一次
+
+    resolveActiveEffect(pa.actorId, pa.effectCard);
     broadcastState();
   }, NOPE_WINDOW_MS);
 }
 
-// --- Socket ---
+// ---------------- Socket ----------------
 io.on('connection', (socket) => {
   console.log('玩家加入: ' + socket.id);
 
@@ -403,14 +464,13 @@ io.on('connection', (socket) => {
   if (!playerIds.includes(socket.id)) playerIds.push(socket.id);
 
   recomputePhaseAndMaybeEndOrStart();
-
   socket.emit('gameState', buildState());
 
   socket.on('requestState', () => {
     socket.emit('gameState', buildState());
   });
 
-  // --- 阻止（可在非自己回合打出） ---
+  // 阻止（可在非自己回合打出）
   socket.on('playNope', () => {
     const v = validateCanPlayNope(socket);
     if (!v.ok) {
@@ -428,7 +488,6 @@ io.on('connection', (socket) => {
     hand.splice(idx, 1);
     discard('阻止');
 
-    // 阻止可以阻止阻止：我们只做奇偶翻转
     pendingAction.nopeCount += 1;
 
     io.emit('cardPlayed', { id: socket.id, card: '阻止' });
@@ -437,7 +496,7 @@ io.on('connection', (socket) => {
     broadcastState();
   });
 
-  // 出牌：跳过 / 攻击 / 预知 / 克隆牌（这些都会进入 pendingAction，可被阻止）
+  // 出牌：跳过/攻击/预知/底抽/洗混/克隆牌（都进入 pendingAction，可被阻止）
   socket.on('playCard', ({ card } = {}) => {
     const v = validateCanPlayTurnCard(socket);
     if (!v.ok) {
@@ -451,7 +510,7 @@ io.on('connection', (socket) => {
 
     const hand = players[socket.id].hand;
 
-    // 克隆牌：克隆弃牌堆顶牌效果（支持：跳过/攻击/预知；不支持拆除/阻止/炸弹/普通牌）
+    // 克隆牌：可克隆（跳过/攻击/预知/底抽/洗混）
     if (card === '克隆牌') {
       const idx = hand.indexOf('克隆牌');
       if (idx === -1) {
@@ -464,18 +523,18 @@ io.on('connection', (socket) => {
         socket.emit('errorMsg', { message: '弃牌堆为空，无法克隆' });
         return;
       }
-      if (!['跳过', '攻击', '预知'].includes(top)) {
+
+      const clonables = ['跳过', '攻击', '预知', '底抽', '洗混'];
+      if (!clonables.includes(top)) {
         socket.emit('errorMsg', { message: `弃牌堆顶牌为【${top}】，当前不可克隆其效果` });
         return;
       }
 
-      // 消耗克隆牌并弃置
       hand.splice(idx, 1);
       discard('克隆牌');
 
       io.emit('cardPlayed', { id: socket.id, card: '克隆牌', clonedCard: top });
 
-      // 进入可阻止窗口：展示克隆牌，但执行 top 的效果
       createPendingAction({
         actorId: socket.id,
         displayCard: '克隆牌',
@@ -486,7 +545,8 @@ io.on('connection', (socket) => {
     }
 
     // 其他主动牌
-    if (!['跳过', '攻击', '预知'].includes(card)) {
+    const playable = ['跳过', '攻击', '预知', '底抽', '洗混'];
+    if (!playable.includes(card)) {
       socket.emit('errorMsg', { message: `暂不支持此卡牌：${card}` });
       return;
     }
@@ -497,13 +557,11 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // 消耗并弃置
     hand.splice(idx, 1);
     discard(card);
 
     io.emit('cardPlayed', { id: socket.id, card });
 
-    // 进入可阻止窗口
     createPendingAction({
       actorId: socket.id,
       displayCard: card,
@@ -511,7 +569,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  // 抽牌（抽牌不进入“可阻止动作”机制）
+  // 抽牌（从牌顶抽）
   socket.on('drawCard', () => {
     if (phase !== 'playing') {
       socket.emit('errorMsg', { message: '需要至少 2 名玩家且游戏进行中才能抽牌' });
@@ -525,68 +583,13 @@ io.on('connection', (socket) => {
     if (socket.id !== playerIds[currentTurnIndex]) return;
     if (!players[socket.id] || players[socket.id].isDead) return;
 
-    if (deck.length === 0) {
-      socket.emit('errorMsg', { message: '牌库已空，无法抽牌' });
-      return;
-    }
-
-    const card = deck.pop();
-    topCardPublic = null;
-
-    if (card === '炸弹') {
-      const player = players[socket.id];
-
-      // 这里不允许“阻止拆除”，因为拆除不是打出牌，而是炸弹结算逻辑的一部分
-
-      // 你之前的规则：弃牌堆顶是拆除且手里有克隆 -> 优先消耗克隆当拆除
-      const cloneIndex = player.hand.indexOf('克隆牌');
-      const canCloneAsDefuse = (cloneIndex !== -1) && (discardTop() === '拆除');
-      if (canCloneAsDefuse) {
-        player.hand.splice(cloneIndex, 1);
-        discard('克隆牌');
-        io.emit('cardPlayed', { id: socket.id, card: '克隆牌', clonedCard: '拆除' });
-
-        defusingPlayerId = socket.id;
-        broadcastState();
-        socket.emit('askInsertBomb', { maxIndex: deck.length });
-        return;
-      }
-
-      const defuseIndex = player.hand.indexOf('拆除');
-      if (defuseIndex !== -1) {
-        player.hand.splice(defuseIndex, 1);
-        discard('拆除');
-
-        defusingPlayerId = socket.id;
-        broadcastState();
-        socket.emit('askInsertBomb', { maxIndex: deck.length });
-        return;
-      }
-
-      // 没拆除 -> 死亡
-      player.isDead = true;
-      discard('炸弹');
-
-      io.emit('playerDied', { id: socket.id });
-
-      recomputePhaseAndMaybeEndOrStart();
-
-      if (phase === 'playing') {
-        currentTurnsLeft = 0; // 当前玩家已死，强制结束其回合
-        endOneTurnOrAdvance();
-      }
-      return;
-    }
-
-    // 非炸弹：入手并结束一个回合
-    players[socket.id].hand.push(card);
-    endOneTurnOrAdvance();
+    performDraw(socket.id, false);
   });
 
   // 塞炸弹
   socket.on('insertBomb', ({ index, isPublic }) => {
     if (phase !== 'playing') return;
-    if (pendingAction) return; // 防御：理论上不会发生
+    if (pendingAction) return;
     if (socket.id !== playerIds[currentTurnIndex]) return;
     if (defusingPlayerId !== socket.id) return;
     if (!players[socket.id] || players[socket.id].isDead) return;
@@ -624,7 +627,6 @@ io.on('connection', (socket) => {
       broadcastState();
       return;
     }
-
     startNewRound();
   });
 
@@ -641,7 +643,6 @@ io.on('connection', (socket) => {
 
     delete pendingExtraTurns[socket.id];
 
-    // 如果待结算动作的发起者离开，直接取消该动作（避免悬挂）
     if (pendingAction && pendingAction.actorId === socket.id) {
       clearPendingAction('发起者已离开，动作取消');
     }
