@@ -9,6 +9,7 @@
 
   <style>
     body { background: #222; overflow: hidden; font-family: sans-serif; margin: 0; user-select: none; }
+
     .scene { perspective: 1000px; width: 100vw; height: 100vh; display: flex; justify-content: center; align-items: center; }
     .table {
       width: 90vw; height: 60vh; max-width: 800px;
@@ -17,6 +18,7 @@
       transform-style: preserve-3d; position: relative;
       box-shadow: 0 50px 50px rgba(0,0,0,0.5);
     }
+
     .info-text {
       position: absolute; top: -72px; width: 100%;
       text-align: center; color: white;
@@ -71,18 +73,27 @@
       transform: translateZ(50px);
       flex-wrap: wrap; padding: 0 10px;
     }
+
     .card {
       width: 70px; height: 100px; background: white; border-radius: 6px;
       display: flex; justify-content: center; align-items: center;
       font-weight: bold; box-shadow: 2px 2px 5px rgba(0,0,0,0.3); font-size: 14px;
       transition: 0.2s;
+      position: relative;
     }
     .card:hover { transform: translateY(-20px); }
     .card.defuse { background: #b9f6ca; color: #1b5e20; border: 2px solid #00c853; }
-    .card.playable {
-      border: 2px solid #00e676;
-      box-shadow: 0 0 12px rgba(0, 230, 118, 0.7);
-      cursor: pointer;
+    .card.playable { border: 2px solid #00e676; box-shadow: 0 0 12px rgba(0, 230, 118, 0.7); cursor: pointer; }
+
+    .badge {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      background: rgba(0,0,0,0.65);
+      color: #fff;
+      border-radius: 10px;
+      padding: 2px 6px;
+      font-size: 11px;
     }
 
     .modal-overlay {
@@ -91,14 +102,17 @@
       display: flex; flex-direction: column; justify-content: center; align-items: center;
       color: white;
     }
+
     .slider-container { width: 80%; max-width: 400px; margin: 30px 0; text-align: center; }
     input[type=range] { width: 100%; height: 20px; accent-color: #ff9800; cursor: pointer; }
+
     .confirm-btn {
       padding: 15px 40px; font-size: 18px; background: #ff5252; color: white;
       border: none; border-radius: 50px; cursor: pointer; font-weight: bold;
       box-shadow: 0 0 20px #ff5252; margin-top: 20px;
     }
     .confirm-btn:active { transform: scale(0.95); }
+
     .checkbox-wrapper {
       margin-top: 15px; display: flex; align-items: center; justify-content: center; gap: 10px;
       background: rgba(255, 255, 255, 0.1); padding: 10px 20px; border-radius: 20px;
@@ -115,11 +129,195 @@
     }
     .preview-card .icon { font-size: 40px; margin-bottom: 10px; }
     .preview-card .name { font-size: 14px; opacity: 0.95; }
+
+    .player-panel {
+      position: fixed; top: 12px; right: 12px;
+      width: 260px; max-height: 45vh; overflow: auto;
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 12px;
+      padding: 10px;
+      color: #fff;
+      z-index: 900;
+      backdrop-filter: blur(6px);
+    }
+    .player-panel h3 { margin: 0 0 8px 0; font-size: 14px; color: #ffca28; font-weight: 700; }
+    .player-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 6px 8px; border-radius: 10px; margin-bottom: 6px;
+      background: rgba(255,255,255,0.06);
+    }
+    .player-row.me { outline: 1px solid rgba(0,230,118,0.55); }
+    .player-row.turn { box-shadow: 0 0 10px rgba(0,230,118,0.45); }
+    .player-left { display: flex; flex-direction: column; gap: 2px; }
+    .pid { font-size: 12px; opacity: 0.85; }
+    .status { font-size: 12px; opacity: 0.9; }
+    .handcount { font-size: 12px; opacity: 0.95; }
+
+    .chat-panel {
+      position: fixed; right: 12px; bottom: 12px;
+      width: 320px; height: 260px;
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 12px;
+      z-index: 900;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      backdrop-filter: blur(6px);
+    }
+    .chat-header {
+      padding: 8px 10px;
+      font-size: 14px;
+      color: #ffca28;
+      font-weight: 700;
+      border-bottom: 1px solid rgba(255,255,255,0.12);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .chat-body {
+      flex: 1;
+      padding: 8px 10px;
+      overflow: auto;
+      font-size: 12px;
+      color: #fff;
+    }
+    .chat-msg { margin-bottom: 8px; line-height: 1.35; }
+    .chat-msg .meta { opacity: 0.75; margin-right: 6px; }
+    .chat-msg.me .meta { color: #00e676; opacity: 0.95; }
+    .chat-input {
+      display: flex;
+      border-top: 1px solid rgba(255,255,255,0.12);
+      padding: 8px;
+      gap: 8px;
+      background: rgba(0,0,0,0.2);
+    }
+    .chat-input input {
+      flex: 1;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+      padding: 8px 10px;
+      outline: none;
+    }
+    .chat-input button {
+      border: none;
+      border-radius: 10px;
+      padding: 8px 12px;
+      cursor: pointer;
+      background: rgba(0,230,118,0.85);
+      color: #0b1a12;
+      font-weight: 800;
+    }
+    .chat-input button:active { transform: scale(0.98); }
+
+    .target-list {
+      width: 90%;
+      max-width: 420px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 14px;
+      padding: 14px;
+      margin-top: 14px;
+    }
+    .target-item {
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      padding: 10px 12px;
+      border-radius: 12px;
+      margin-bottom: 10px;
+      background: rgba(0,0,0,0.25);
+      cursor: pointer;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .target-item:hover { border-color: rgba(0,230,118,0.6); }
+    .target-item.disabled { opacity: 0.35; cursor: not-allowed; }
   </style>
 </head>
 
 <body>
 <div id="app">
+
+  <!-- 玩家列表 -->
+  <div class="player-panel">
+    <h3>玩家列表（手牌数）</h3>
+    <div
+      class="player-row"
+      v-for="p in otherPlayersSorted"
+      :key="p.id"
+      :class="{
+        'me': p.id === myId,
+        'turn': p.id === currentTurnId
+      }"
+    >
+      <div class="player-left">
+        <div class="pid">{{ shortId(p.id) }} <span v-if="p.id === myId">(你)</span></div>
+        <div class="status">
+          <span v-if="p.isDead" style="color:#ff5252;">已死亡</span>
+          <span v-else style="color:#00e676;">存活</span>
+        </div>
+      </div>
+      <div class="handcount">手牌：{{ p.handCount }}</div>
+    </div>
+  </div>
+
+  <!-- 聊天区 -->
+  <div class="chat-panel">
+    <div class="chat-header">
+      <div>聊天</div>
+      <div style="font-size:12px; opacity:0.75;">在线：{{ playerCount }}</div>
+    </div>
+    <div class="chat-body" ref="chatBody">
+      <div
+        class="chat-msg"
+        v-for="(m, idx) in chatMessages"
+        :key="idx"
+        :class="{ 'me': m.id === myId }"
+      >
+        <span class="meta">[{{ timeText(m.ts) }}] {{ shortId(m.id) }}:</span>
+        <span>{{ m.text }}</span>
+      </div>
+    </div>
+    <div class="chat-input">
+      <input
+        v-model="chatInput"
+        placeholder="输入消息，回车发送..."
+        @keydown.enter.prevent="sendChat"
+      />
+      <button @click="sendChat">发送</button>
+    </div>
+  </div>
+
+  <!-- 选择目标玩家 Modal（角色牌两张成对） -->
+  <div v-if="isChoosingTarget" class="modal-overlay" style="background: rgba(0,0,0,0.92);">
+    <h1 style="margin:0;">🎭 两张【{{ pairCardToPlay }}】</h1>
+    <p style="color:#ccc; margin-top:10px;">选择一个目标玩家，随机抽他 1 张牌（不公开对方手牌）。</p>
+
+    <div class="target-list">
+      <div
+        class="target-item"
+        v-for="p in stealTargets"
+        :key="p.id"
+        :class="{ disabled: p.isDead }"
+        @click="selectTarget(p)"
+      >
+        <div>
+          {{ shortId(p.id) }}
+          <span v-if="p.id === currentTurnId" style="color:#00e676; margin-left:6px;">当前回合</span>
+        </div>
+        <div style="opacity:0.9;">手牌：{{ p.handCount }}</div>
+      </div>
+    </div>
+
+    <button class="confirm-btn"
+            style="background:#607d8b; box-shadow:none;"
+            @click="cancelChooseTarget">
+      取消
+    </button>
+  </div>
 
   <!-- 结算弹窗 -->
   <div v-if="isGameOver" class="modal-overlay" style="background: rgba(44, 62, 80, 0.98);">
@@ -142,7 +340,7 @@
     </button>
   </div>
 
-  <!-- 死亡弹窗（结算时不显示） -->
+  <!-- 死亡弹窗 -->
   <div v-if="amIDead && !isGameOver" class="modal-overlay" style="background: rgba(50,0,0,0.95);">
     <h1 style="font-size: 50px; color: red;">YOU DIED</h1>
     <p>你炸了。</p>
@@ -209,7 +407,7 @@
           🟣 本局已结束
         </div>
         <div v-else-if="amIDead">已死亡</div>
-        <div v-else-if="isMyTurn" style="color:#00e676">
+        <div v-else-if="isMyTurnServer" style="color:#00e676">
           🟢 轮到你了（剩余回合：{{ turnsLeftForCurrent }}）
         </div>
         <div v-else>
@@ -236,7 +434,7 @@
       <div
         class="draw-pile"
         :class="{
-          'my-turn-glow': isMyTurn && !isDefusing && !isGameOver && phase === 'playing',
+          'my-turn-glow': isMyTurnServer && !isDefusing && !isGameOver && phase === 'playing',
           'is-bomb': topCardPublic === '炸弹'
         }"
         @click="drawCard"
@@ -261,6 +459,9 @@
           :title="cardHelp(card)"
         >
           {{ card }}
+          <div class="badge" v-if="cardCount(card) >= 2 && characterCards.includes(card)">
+            ×{{ cardCount(card) }}
+          </div>
         </div>
       </div>
 
@@ -270,44 +471,74 @@
 </div>
 
 <script>
-  const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
+  const { createApp, ref, computed, onMounted, onUnmounted, nextTick } = Vue;
   const socket = io();
 
   createApp({
     setup() {
       const myId = ref('');
       const myHand = ref([]);
-      const deckCount = ref(0);
       const currentTurnId = ref(null);
-      const amIDead = ref(false);
-      const lastActionMsg = ref('');
+      const deckCount = ref(0);
 
       const phase = ref('waiting');
-
-      const isDefusing = ref(false);
-      const insertIndex = ref(0);
-      const deckMaxIndex = ref(0);
       const topCardPublic = ref(null);
-      const isPublicInsert = ref(false);
-
-      const isGameOver = ref(false);
-      const isWinner = ref(false);
-      const winReasonText = ref('');
 
       const discardCount = ref(0);
       const discardTopCard = ref(null);
 
       const turnsLeftForCurrent = ref(0);
 
-      const isPreviewing = ref(false);
-      const previewCards = ref([]);
-
       const pendingAction = ref(null);
       const pendingMsLeft = ref(0);
       let msTimer = null;
 
+      const isDefusing = ref(false);
+      const insertIndex = ref(0);
+      const deckMaxIndex = ref(0);
+      const isPublicInsert = ref(false);
+
+      const amIDead = ref(false);
+
+      const isGameOver = ref(false);
+      const isWinner = ref(false);
+      const winReasonText = ref('');
+
+      const lastActionMsg = ref('');
+
+      const isPreviewing = ref(false);
+      const previewCards = ref([]);
+
+      // 玩家公共信息（只含 handCount）
+      const playersPublic = ref({});
+
+      // 聊天
+      const chatMessages = ref([]);
+      const chatInput = ref('');
+      const chatBody = ref(null);
+
+      // 角色牌
+      const characterCards = ['海绵爸爸', '派小星', '章鱼弟'];
+
+      // 选择目标（成对出牌）
+      const isChoosingTarget = ref(false);
+      const pairCardToPlay = ref(null);
+
+      // 主动牌
       const activeTurnCards = ['跳过', '攻击', '预知', '克隆牌', '底抽', '洗混'];
       const nopeCard = '阻止';
+
+      // 关键修复：由服务端下发是否轮到我
+      const isMyTurnServer = ref(false);
+
+      const shortId = (id) => id ? id.slice(0, 6) : '';
+      const timeText = (ts) => {
+        const d = new Date(ts || Date.now());
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        const ss = String(d.getSeconds()).padStart(2, '0');
+        return `${hh}:${mm}:${ss}`;
+      };
 
       const cardIcon = (card) => {
         switch (card) {
@@ -320,7 +551,9 @@
           case '阻止': return '✋';
           case '底抽': return '⬇️';
           case '洗混': return '🔀';
-          case '普通牌': return '🟦';
+          case '海绵爸爸': return '🧽';
+          case '派小星': return '⭐';
+          case '章鱼弟': return '🐙';
           default: return '—';
         }
       };
@@ -329,12 +562,83 @@
         if (card === '跳过') return '跳过：结束本回合（不抽牌）（可被阻止）';
         if (card === '攻击') return '攻击：结束当前回合并让下家总共 2 回合（可叠加）（可被阻止）';
         if (card === '预知') return '预知：查看牌顶三张（可被阻止）';
-        if (card === '克隆牌') return '克隆牌：克隆弃牌堆顶牌效果（支持：跳过/攻击/预知/底抽/洗混）（可被阻止）';
+        if (card === '克隆牌') return '克隆牌：克隆弃牌堆顶牌效果（可被阻止）';
         if (card === '阻止') return '阻止：可在非自己回合使用，使待结算动作失效（阻止可被阻止）';
-        if (card === '底抽') return '底抽：从牌底抽 1 张，作为本回合抽牌并结束回合（可被阻止）';
-        if (card === '洗混') return '洗混：重新洗混当前剩余牌堆，并关闭明牌（不结束回合）（可被阻止）';
+        if (card === '底抽') return '底抽：从牌底抽 1 张并结束回合（可被阻止）';
+        if (card === '洗混') return '洗混：洗混剩余牌堆，并关闭明牌（可被阻止）';
+        if (characterCards.includes(card)) return '角色牌：两张同名可一起打出，随机抽取目标 1 张牌（可被阻止）';
         return '';
       };
+
+      const countMap = computed(() => {
+        const m = {};
+        for (const c of myHand.value) m[c] = (m[c] || 0) + 1;
+        return m;
+      });
+
+      const cardCount = (card) => countMap.value[card] || 0;
+
+      const playerCount = computed(() => Object.keys(playersPublic.value || {}).length);
+
+      const otherPlayersSorted = computed(() => {
+        const arr = Object.values(playersPublic.value || {});
+        arr.sort((a, b) => {
+          const aTurn = a.id === currentTurnId.value ? 1 : 0;
+          const bTurn = b.id === currentTurnId.value ? 1 : 0;
+          if (aTurn !== bTurn) return bTurn - aTurn;
+
+          const aMe = a.id === myId.value ? 1 : 0;
+          const bMe = b.id === myId.value ? 1 : 0;
+          if (aMe !== bMe) return bMe - aMe;
+
+          const aAlive = a.isDead ? 0 : 1;
+          const bAlive = b.isDead ? 0 : 1;
+          if (aAlive !== bAlive) return bAlive - aAlive;
+
+          return a.id.localeCompare(b.id);
+        });
+        return arr;
+      });
+
+      const canPlayTurnCard = computed(() => {
+        return phase.value === 'playing'
+          && !isGameOver.value
+          && !amIDead.value
+          && isMyTurnServer.value
+          && !isDefusing.value
+          && !pendingAction.value
+          && !isChoosingTarget.value;
+      });
+
+      const canPlayNope = computed(() => {
+        return phase.value === 'playing'
+          && !isGameOver.value
+          && !amIDead.value
+          && !isDefusing.value
+          && !!pendingAction.value
+          && myHand.value.includes(nopeCard);
+      });
+
+      const pendingActionText = computed(() => {
+        if (!pendingAction.value) return '';
+        const pa = pendingAction.value;
+        return `${pa.displayCard}`;
+      });
+
+      function tickMsLeft() {
+        if (!pendingAction.value || !pendingAction.value.resolveAt) {
+          pendingMsLeft.value = 0;
+          return;
+        }
+        pendingMsLeft.value = Math.max(0, Math.floor(pendingAction.value.resolveAt - Date.now()));
+      }
+
+      function autoScrollChat() {
+        nextTick(() => {
+          if (!chatBody.value) return;
+          chatBody.value.scrollTop = chatBody.value.scrollHeight;
+        });
+      }
 
       function applyEnded(wid) {
         isGameOver.value = true;
@@ -350,13 +654,22 @@
         }
       }
 
+      // --- Socket 监听 ---
       socket.on('connect', () => {
+        // 这里保留，但最终以 gameState.youId 为准
         myId.value = socket.id;
         socket.emit('requestState');
       });
 
       socket.on('gameState', (data) => {
-        if (!myId.value && socket.id) myId.value = socket.id;
+        // 兜底：以服务端给的 youId 为准（解决时序/重连）
+        if (data.youId) myId.value = data.youId;
+
+        // 关键：由服务端下发
+        isMyTurnServer.value = !!data.isMyTurn;
+
+        playersPublic.value = data.players || {};
+        myHand.value = data.myHand || [];
 
         deckCount.value = data.deckCount;
         currentTurnId.value = data.currentTurn;
@@ -371,19 +684,26 @@
 
         pendingAction.value = data.pendingAction ?? null;
 
-        if (myId.value && data.players && data.players[myId.value]) {
-          const me = data.players[myId.value];
-          myHand.value = me.hand;
-          amIDead.value = me.isDead;
+        amIDead.value = !!playersPublic.value?.[myId.value]?.isDead;
+
+        if (Array.isArray(data.chatHistory)) {
+          chatMessages.value = data.chatHistory;
+          autoScrollChat();
         }
 
-        if (phase.value === 'ended') {
-          applyEnded(data.winnerId);
-        } else {
+        if (phase.value === 'ended') applyEnded(data.winnerId);
+        else {
           isGameOver.value = false;
           isWinner.value = false;
           winReasonText.value = '';
         }
+      });
+
+      socket.on('chatMessage', (m) => {
+        if (!m || !m.text) return;
+        chatMessages.value.push(m);
+        if (chatMessages.value.length > 200) chatMessages.value = chatMessages.value.slice(-200);
+        autoScrollChat();
       });
 
       socket.on('askInsertBomb', (data) => {
@@ -400,17 +720,13 @@
 
       socket.on('cardPlayed', (data) => {
         if (!data) return;
-        const actor = (data.id === socket.id) ? '你' : '对手';
-        if (data.card === '克隆牌' && data.clonedCard) {
-          lastActionMsg.value = `🧬 ${actor} 使用【克隆牌】，目标【${data.clonedCard}】`;
-        } else {
-          lastActionMsg.value = `🃏 ${actor} 使用【${data.card}】`;
-        }
+        const actor = (data.id === myId.value) ? '你' : '对手';
+        lastActionMsg.value = `🃏 ${actor} 使用【${data.card}】`;
       });
 
       socket.on('nopePlayed', (data) => {
         if (!data) return;
-        const actor = (data.id === socket.id) ? '你' : '对手';
+        const actor = (data.id === myId.value) ? '你' : '对手';
         lastActionMsg.value = `✋ ${actor} 打出了【阻止】（次数：${data.nopeCount}）`;
       });
 
@@ -420,18 +736,36 @@
         else lastActionMsg.value = `✅ 动作生效`;
       });
 
-      socket.on('gameOver', (data) => {
-        applyEnded(data.winnerId);
+      socket.on('pairSteal', (data) => {
+        if (!data) return;
+        const actor = data.actorId === myId.value ? '你' : shortId(data.actorId);
+        const target = data.targetId === myId.value ? '你' : shortId(data.targetId);
+
+        if (!data.success) {
+          lastActionMsg.value = `🎭 ${actor} 尝试从 ${target} 抽取失败：${data.reason || '未知原因'}`;
+          return;
+        }
+        lastActionMsg.value = `🎭 ${actor} 从 ${target} 抽走了一张牌`;
       });
+
+      socket.on('stolenCard', (data) => {
+        if (!data || !data.card) return;
+        lastActionMsg.value = `🎁 你抽到的牌是：【${data.card}】`;
+      });
+
+      socket.on('stolenFromYou', (data) => {
+        const who = data?.by ? shortId(data.by) : '某人';
+        lastActionMsg.value = `😵 你被 ${who} 抽走了一张牌`;
+      });
+
+      socket.on('gameOver', (data) => applyEnded(data.winnerId));
 
       socket.on('gameRestarted', () => {
         isGameOver.value = false;
         isWinner.value = false;
         winReasonText.value = '';
 
-        amIDead.value = false;
         isDefusing.value = false;
-        lastActionMsg.value = "=== 新游戏开始 ===";
         insertIndex.value = 0;
         topCardPublic.value = null;
 
@@ -441,6 +775,10 @@
         pendingAction.value = null;
         pendingMsLeft.value = 0;
 
+        isChoosingTarget.value = false;
+        pairCardToPlay.value = null;
+
+        lastActionMsg.value = "=== 新游戏开始 ===";
         socket.emit('requestState');
       });
 
@@ -448,53 +786,15 @@
         if (data && data.message) lastActionMsg.value = "⚠️ " + data.message;
       });
 
-      const isMyTurn = computed(() => {
-        return phase.value === 'playing'
-          && socket.id === currentTurnId.value
-          && !amIDead.value;
-      });
-
-      const canPlayTurnCard = computed(() => {
-        return phase.value === 'playing'
-          && !isGameOver.value
-          && !amIDead.value
-          && isMyTurn.value
-          && !isDefusing.value
-          && !pendingAction.value;
-      });
-
-      const canPlayNope = computed(() => {
-        return phase.value === 'playing'
-          && !isGameOver.value
-          && !amIDead.value
-          && !isDefusing.value
-          && !!pendingAction.value
-          && myHand.value.includes(nopeCard);
-      });
-
-      const pendingActionText = computed(() => {
-        if (!pendingAction.value) return '';
-        const pa = pendingAction.value;
-        if (pa.displayCard === '克隆牌' && pa.clonedCard) return `克隆牌 → ${pa.effectCard}`;
-        return `${pa.displayCard}`;
-      });
-
-      function tickMsLeft() {
-        if (!pendingAction.value || !pendingAction.value.resolveAt) {
-          pendingMsLeft.value = 0;
-          return;
-        }
-        const left = pendingAction.value.resolveAt - Date.now();
-        pendingMsLeft.value = Math.max(0, Math.floor(left));
-      }
-
       onMounted(() => {
         msTimer = setInterval(tickMsLeft, 100);
+        autoScrollChat();
       });
       onUnmounted(() => {
         if (msTimer) clearInterval(msTimer);
       });
 
+      // --- 交互 ---
       const insertPositionText = computed(() => {
         const idx = parseInt(insertIndex.value);
         if (idx === deckMaxIndex.value) return "牌顶 (最危险)";
@@ -508,16 +808,35 @@
           lastActionMsg.value = "⚠️ 有待结算动作，先等结算/使用阻止";
           return;
         }
-        if (isMyTurn.value && !isDefusing.value) socket.emit('drawCard');
+        if (isMyTurnServer.value && !isDefusing.value && !isChoosingTarget.value) {
+          socket.emit('drawCard');
+        }
+      };
+
+      const isCardPlayable = (card) => {
+        if (card === '阻止') return canPlayNope.value;
+        if (activeTurnCards.includes(card)) return canPlayTurnCard.value;
+        if (characterCards.includes(card)) return canPlayTurnCard.value && (cardCount(card) >= 2);
+        return false;
       };
 
       const onCardClick = (card) => {
         if (card === '阻止') {
           if (!canPlayNope.value) {
-            lastActionMsg.value = "⚠️ 当前不能使用阻止（无待结算动作/你已死亡/拆弹中等）";
+            lastActionMsg.value = "⚠️ 当前不能使用阻止";
             return;
           }
           socket.emit('playNope');
+          return;
+        }
+
+        if (characterCards.includes(card)) {
+          if (!isCardPlayable(card)) {
+            lastActionMsg.value = "⚠️ 角色牌需要两张同名，且必须在你回合使用";
+            return;
+          }
+          pairCardToPlay.value = card;
+          isChoosingTarget.value = true;
           return;
         }
 
@@ -531,48 +850,69 @@
         socket.emit('playCard', { card });
       };
 
-      const isCardPlayable = (card) => {
-        if (card === '阻止') return canPlayNope.value;
-        if (activeTurnCards.includes(card)) return canPlayTurnCard.value;
-        return false;
+      const confirmInsert = () => {
+        isDefusing.value = false;
+        socket.emit('insertBomb', { index: parseInt(insertIndex.value), isPublic: isPublicInsert.value });
       };
+
+      const requestRestart = () => socket.emit('restartGame');
 
       const closePreview = () => {
         isPreviewing.value = false;
         previewCards.value = [];
       };
 
-      const confirmInsert = () => {
-        isDefusing.value = false;
-        socket.emit('insertBomb', {
-          index: parseInt(insertIndex.value),
-          isPublic: isPublicInsert.value
-        });
+      const sendChat = () => {
+        const txt = (chatInput.value || '').trim();
+        if (!txt) return;
+        socket.emit('sendChat', { text: txt });
+        chatInput.value = '';
       };
 
-      const requestRestart = () => {
-        socket.emit('restartGame');
+      const stealTargets = computed(() => {
+        return Object.values(playersPublic.value || {}).filter(p => p.id !== myId.value);
+      });
+
+      const selectTarget = (p) => {
+        if (!p || p.id === myId.value) return;
+        if (p.isDead) {
+          lastActionMsg.value = "⚠️ 目标已死亡，不能选择";
+          return;
+        }
+        socket.emit('playPair', { card: pairCardToPlay.value, targetId: p.id });
+        isChoosingTarget.value = false;
+        pairCardToPlay.value = null;
+      };
+
+      const cancelChooseTarget = () => {
+        isChoosingTarget.value = false;
+        pairCardToPlay.value = null;
       };
 
       return {
-        myHand, deckCount, currentTurnId, amIDead, lastActionMsg,
-        phase,
-        isDefusing, insertIndex, deckMaxIndex, insertPositionText, topCardPublic, isPublicInsert,
+        myId, myHand, currentTurnId, deckCount, phase, topCardPublic,
+        discardCount, discardTopCard, turnsLeftForCurrent,
+        pendingAction, pendingMsLeft,
+        isDefusing, insertIndex, deckMaxIndex, isPublicInsert, insertPositionText,
+        amIDead,
         isGameOver, isWinner, winReasonText,
+        lastActionMsg,
+        isPreviewing, previewCards,
 
-        discardCount, discardTopCard, cardIcon,
+        playersPublic, playerCount, otherPlayersSorted, shortId,
 
-        turnsLeftForCurrent,
+        chatMessages, chatInput, sendChat, chatBody, timeText,
 
-        isPreviewing, previewCards, closePreview,
+        cardIcon, cardHelp, isCardPlayable, onCardClick,
+        characterCards, cardCount,
 
-        pendingAction, pendingActionText, pendingMsLeft,
+        isChoosingTarget, pairCardToPlay, stealTargets, selectTarget, cancelChooseTarget,
 
-        isMyTurn,
+        drawCard, confirmInsert, requestRestart, closePreview,
+        pendingActionText,
 
-        drawCard, onCardClick, isCardPlayable, cardHelp,
-
-        confirmInsert, requestRestart
+        // 服务端判定的回合
+        isMyTurnServer
       };
     }
   }).mount('#app');

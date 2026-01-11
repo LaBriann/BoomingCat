@@ -6,33 +6,39 @@ const io = require('socket.io')(http);
 app.use(express.static('public'));
 
 // --- 游戏核心数据 ---
-let players = {};
+let players = {};            // { [id]: { id, hand:[], isDead } }
 let playerIds = [];
 let currentTurnIndex = 0;
 
 let deck = [];
 let topCardPublic = null;
 
-let discardPile = []; // 弃牌堆（已使用/消耗/爆炸）
+let discardPile = [];
 
 // 游戏阶段
-let phase = 'waiting'; // waiting | playing | ended
+let phase = 'waiting';       // waiting | playing | ended
 let winnerId = null;
 
 // 拆弹锁
 let defusingPlayerId = null;
 
 // 攻击机制：额外回合债务
-let pendingExtraTurns = {}; // { [playerId]: number }
-let currentTurnsLeft = 1;   // 当前玩家剩余回合数（包含本回合）
+let pendingExtraTurns = {};  // { [playerId]: number }
+let currentTurnsLeft = 1;
 
 const MIN_PLAYERS = 2;
-const STARTING_HAND = ['拆除', '拆除', '普通牌'];
+
+// 角色牌替换普通牌
+const CHARACTER_CARDS = ['海绵爸爸', '派小星', '章鱼弟'];
 
 // --- 阻止机制：待结算动作（可被阻止） ---
 let pendingAction = null;
 let pendingActionTimer = null;
 const NOPE_WINDOW_MS = 2000;
+
+// --- 聊天 ---
+const CHAT_MAX = 80;
+let chatHistory = []; // [{id,text,ts}]
 
 // ---------------- 工具函数 ----------------
 function shuffleArrayInPlace(arr) {
@@ -40,6 +46,14 @@ function shuffleArrayInPlace(arr) {
     const j = Math.floor(Math.random() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
+}
+
+function randomOne(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function getStartingHand() {
+  return ['拆除', '拆除', randomOne(CHARACTER_CARDS)];
 }
 
 function shuffleDeckNewRound() {
@@ -53,7 +67,11 @@ function shuffleDeckNewRound() {
     '底抽', '底抽',
     '洗混', '洗混',
     '阻止', '阻止', '阻止',
-    '普通牌', '普通牌', '普通牌', '普通牌', '普通牌'
+
+    // 角色牌（数量可自行调整）
+    '海绵爸爸', '海绵爸爸',
+    '派小星', '派小星',
+    '章鱼弟', '章鱼弟',
   ];
   shuffleArrayInPlace(cards);
   return cards;
@@ -105,16 +123,37 @@ function clearPendingAction(reason = null) {
   }
   pendingAction = null;
 
-  if (reason) {
-    io.emit('actionResolved', { cancelled: true, reason });
-  }
+  if (reason) io.emit('actionResolved', { cancelled: true, reason });
 }
 
-function buildState() {
+// ---- 隐私：只广播公共信息 + 自己手牌 ----
+function buildPublicPlayers() {
+  const obj = {};
+  for (const pid of playerIds) {
+    if (!players[pid]) continue;
+    obj[pid] = {
+      id: pid,
+      isDead: !!players[pid].isDead,
+      handCount: Array.isArray(players[pid].hand) ? players[pid].hand.length : 0
+    };
+  }
+  return obj;
+}
+
+// ---- 关键修复：由服务端下发 isMyTurn ----
+function buildStateForPlayer(viewerId) {
   const currentTurn =
     (phase === 'playing' && playerIds[currentTurnIndex])
       ? playerIds[currentTurnIndex]
       : null;
+
+  const my = players[viewerId];
+  const isMyTurn =
+    phase === 'playing' &&
+    !!currentTurn &&
+    currentTurn === viewerId &&
+    my &&
+    !my.isDead;
 
   const pa = pendingAction
     ? {
@@ -123,12 +162,19 @@ function buildState() {
         effectCard: pendingAction.effectCard,
         clonedCard: pendingAction.clonedCard || null,
         nopeCount: pendingAction.nopeCount,
-        resolveAt: pendingAction.resolveAt
+        resolveAt: pendingAction.resolveAt,
+        pairCard: pendingAction.pairCard || null,
+        targetId: pendingAction.targetId || null
       }
     : null;
 
   return {
-    players,
+    youId: viewerId,
+    isMyTurn,
+
+    players: buildPublicPlayers(),
+    myHand: my?.hand || [],
+
     deckCount: deck.length,
     currentTurn,
     topCardPublic,
@@ -141,12 +187,21 @@ function buildState() {
 
     turnsLeftForCurrent: (phase === 'playing' && currentTurn) ? currentTurnsLeft : 0,
 
-    pendingAction: pa
+    pendingAction: pa,
+
+    chatHistory
   };
 }
 
+function sendStateTo(id) {
+  emitToPlayer(id, 'gameState', buildStateForPlayer(id));
+}
+
 function broadcastState() {
-  io.emit('gameState', buildState());
+  for (const pid of playerIds) {
+    if (!players[pid]) continue;
+    sendStateTo(pid);
+  }
 }
 
 function endRound(newWinnerId) {
@@ -167,7 +222,6 @@ function endRound(newWinnerId) {
 
 function recomputePhaseAndMaybeEndOrStart() {
   playerIds = playerIds.filter(pid => players[pid]);
-
   const connected = playerIds.length;
 
   if (connected < MIN_PLAYERS) {
@@ -226,7 +280,7 @@ function startNewRound() {
   for (const id of playerIds) {
     if (!players[id]) continue;
     players[id].isDead = false;
-    players[id].hand = [...STARTING_HAND];
+    players[id].hand = getStartingHand();
   }
 
   const alive = getAlivePlayers();
@@ -243,12 +297,12 @@ function startNewRound() {
   broadcastState();
 }
 
-function validateCanPlayTurnCard(socket) {
-  if (phase !== 'playing') return { ok: false, msg: '当前不是游戏进行中，无法出牌' };
+function validateCanPlayTurnAction(socket) {
+  if (phase !== 'playing') return { ok: false, msg: '当前不是游戏进行中，无法操作' };
   if (pendingAction) return { ok: false, msg: '有待结算动作，暂时不能进行新动作（可使用阻止）' };
   if (defusingPlayerId) return { ok: false, msg: '正在拆弹中，必须先把炸弹塞回去' };
-  if (!players[socket.id] || players[socket.id].isDead) return { ok: false, msg: '你已死亡，无法出牌' };
-  if (socket.id !== playerIds[currentTurnIndex]) return { ok: false, msg: '还没轮到你，不能出牌' };
+  if (!players[socket.id] || players[socket.id].isDead) return { ok: false, msg: '你已死亡，无法操作' };
+  if (socket.id !== playerIds[currentTurnIndex]) return { ok: false, msg: '还没轮到你，不能操作' };
   return { ok: true };
 }
 
@@ -260,7 +314,7 @@ function validateCanPlayNope(socket) {
   return { ok: true };
 }
 
-// 结束一个回合（抽牌后/跳过/攻击/底抽后会调用）
+// 结束一个回合
 function endOneTurnOrAdvance() {
   if (phase !== 'playing') return;
 
@@ -292,7 +346,7 @@ function endOneTurnOrAdvance() {
   broadcastState();
 }
 
-// 执行一次抽牌（支持从牌顶/牌底抽）
+// 抽牌（支持顶/底）
 function performDraw(playerId, fromBottom = false) {
   if (phase !== 'playing') return;
   if (!players[playerId] || players[playerId].isDead) return;
@@ -302,15 +356,13 @@ function performDraw(playerId, fromBottom = false) {
     return;
   }
 
-  // 抽牌会关闭明牌（你之前的逻辑）
   topCardPublic = null;
-
   const card = fromBottom ? deck.shift() : deck.pop();
 
   if (card === '炸弹') {
     const player = players[playerId];
 
-    // 规则：弃牌堆顶是拆除 && 手里有克隆 -> 优先用克隆当拆除
+    // 弃牌堆顶拆除 + 手里克隆 => 优先克隆拆除
     const cloneIndex = player.hand.indexOf('克隆牌');
     const canCloneAsDefuse = (cloneIndex !== -1) && (discardTop() === '拆除');
     if (canCloneAsDefuse) {
@@ -335,10 +387,9 @@ function performDraw(playerId, fromBottom = false) {
       return;
     }
 
-    // 没拆除 -> 死亡
+    // 死亡
     player.isDead = true;
     discard('炸弹');
-
     io.emit('playerDied', { id: playerId });
 
     recomputePhaseAndMaybeEndOrStart();
@@ -350,19 +401,17 @@ function performDraw(playerId, fromBottom = false) {
     return;
   }
 
-  // 非炸弹入手并结束一个回合
   players[playerId].hand.push(card);
   endOneTurnOrAdvance();
 }
 
-// 执行主动牌效果（最终落地）
+// 执行主动效果（非成对抽取）
 function resolveActiveEffect(actorId, effectCard) {
   if (effectCard === '跳过') {
     endOneTurnOrAdvance();
     return;
   }
 
-  // 攻击：让下家总共 2 回合 => pendingExtra +1，且只结束当前这 1 个回合
   if (effectCard === '攻击') {
     const nextIdx = getNextAliveIndex(currentTurnIndex);
     if (nextIdx === -1) {
@@ -371,30 +420,26 @@ function resolveActiveEffect(actorId, effectCard) {
     }
     const nextId = playerIds[nextIdx];
     pendingExtraTurns[nextId] = (pendingExtraTurns[nextId] || 0) + 1;
-
     endOneTurnOrAdvance();
     return;
   }
 
-  // 预知：看牌顶三张（不结束回合）
   if (effectCard === '预知') {
     const top3 = [];
     for (let k = 1; k <= 3; k++) {
       const idx = deck.length - k;
-      if (idx >= 0) top3.push(deck[idx]); // 牌顶在数组末尾
+      if (idx >= 0) top3.push(deck[idx]);
     }
     emitToPlayer(actorId, 'previewCards', { cards: top3 });
     broadcastState();
     return;
   }
 
-  // 底抽：从牌底抽 1 张，作为本回合的“抽牌”并结束回合
   if (effectCard === '底抽') {
     performDraw(actorId, true);
     return;
   }
 
-  // 洗混：重新洗混当前剩余牌堆，并关闭明牌；不结束回合
   if (effectCard === '洗混') {
     shuffleArrayInPlace(deck);
     topCardPublic = null;
@@ -402,30 +447,28 @@ function resolveActiveEffect(actorId, effectCard) {
     return;
   }
 
-  // 未知：忽略
   broadcastState();
 }
 
-// 创建可阻止的待结算动作
-function createPendingAction({ actorId, displayCard, effectCard, clonedCard = null }) {
+// 创建可阻止动作
+function createPendingAction(payload) {
   const startedAt = Date.now();
   pendingAction = {
-    actorId,
-    displayCard,
-    effectCard,
-    clonedCard,
+    ...payload,
     nopeCount: 0,
     startedAt,
     resolveAt: startedAt + NOPE_WINDOW_MS
   };
 
   io.emit('actionPending', {
-    actorId,
-    displayCard,
-    effectCard,
-    clonedCard,
+    actorId: pendingAction.actorId,
+    displayCard: pendingAction.displayCard,
+    effectCard: pendingAction.effectCard,
+    clonedCard: pendingAction.clonedCard || null,
     nopeCount: 0,
-    resolveAt: pendingAction.resolveAt
+    resolveAt: pendingAction.resolveAt,
+    pairCard: pendingAction.pairCard || null,
+    targetId: pendingAction.targetId || null
   });
 
   broadcastState();
@@ -446,6 +489,46 @@ function createPendingAction({ actorId, displayCard, effectCard, clonedCard = nu
 
     io.emit('actionResolved', { cancelled: false });
 
+    // 成对抽取结算
+    if (pa.effectCard === 'PAIR_STEAL') {
+      const actorId = pa.actorId;
+      const targetId = pa.targetId;
+
+      if (!players[actorId] || players[actorId].isDead) {
+        broadcastState();
+        return;
+      }
+      if (!players[targetId] || players[targetId].isDead) {
+        io.emit('pairSteal', { actorId, targetId, success: false, reason: '目标已不在或已死亡' });
+        broadcastState();
+        return;
+      }
+
+      const targetHand = players[targetId].hand || [];
+      if (targetHand.length === 0) {
+        io.emit('pairSteal', { actorId, targetId, success: false, reason: '目标没有手牌' });
+        broadcastState();
+        return;
+      }
+
+      const idx = Math.floor(Math.random() * targetHand.length);
+      const stolen = targetHand.splice(idx, 1)[0];
+      players[actorId].hand.push(stolen);
+
+      // 对外不公开抽到什么
+      io.emit('pairSteal', { actorId, targetId, success: true });
+
+      // 只给抽取者显示具体牌
+      emitToPlayer(actorId, 'stolenCard', { card: stolen });
+
+      // 目标提示（不含具体牌名）
+      emitToPlayer(targetId, 'stolenFromYou', { by: actorId });
+
+      broadcastState();
+      return;
+    }
+
+    // 其他牌照旧
     resolveActiveEffect(pa.actorId, pa.effectCard);
     broadcastState();
   }, NOPE_WINDOW_MS);
@@ -457,20 +540,35 @@ io.on('connection', (socket) => {
 
   players[socket.id] = {
     id: socket.id,
-    hand: [...STARTING_HAND],
+    hand: getStartingHand(),
     isDead: false
   };
 
   if (!playerIds.includes(socket.id)) playerIds.push(socket.id);
 
   recomputePhaseAndMaybeEndOrStart();
-  socket.emit('gameState', buildState());
+  sendStateTo(socket.id);
 
   socket.on('requestState', () => {
-    socket.emit('gameState', buildState());
+    sendStateTo(socket.id);
   });
 
-  // 阻止（可在非自己回合打出）
+  // -------- 聊天 --------
+  socket.on('sendChat', ({ text } = {}) => {
+    if (typeof text !== 'string') return;
+    const msg = text.replace(/\s+/g, ' ').trim();
+    if (!msg) return;
+    if (msg.length > 200) return;
+
+    const payload = { id: socket.id, text: msg, ts: Date.now() };
+    chatHistory.push(payload);
+    if (chatHistory.length > CHAT_MAX) chatHistory = chatHistory.slice(-CHAT_MAX);
+
+    io.emit('chatMessage', payload);
+    broadcastState();
+  });
+
+  // 阻止（非自己回合可用）
   socket.on('playNope', () => {
     const v = validateCanPlayNope(socket);
     if (!v.ok) {
@@ -496,9 +594,9 @@ io.on('connection', (socket) => {
     broadcastState();
   });
 
-  // 出牌：跳过/攻击/预知/底抽/洗混/克隆牌（都进入 pendingAction，可被阻止）
+  // 出牌（回合内）
   socket.on('playCard', ({ card } = {}) => {
-    const v = validateCanPlayTurnCard(socket);
+    const v = validateCanPlayTurnAction(socket);
     if (!v.ok) {
       socket.emit('errorMsg', { message: v.msg });
       return;
@@ -509,6 +607,12 @@ io.on('connection', (socket) => {
     }
 
     const hand = players[socket.id].hand;
+
+    // 角色牌单张不可打
+    if (CHARACTER_CARDS.includes(card)) {
+      socket.emit('errorMsg', { message: '角色牌需要两张同名一起打出' });
+      return;
+    }
 
     // 克隆牌：可克隆（跳过/攻击/预知/底抽/洗混）
     if (card === '克隆牌') {
@@ -544,7 +648,6 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // 其他主动牌
     const playable = ['跳过', '攻击', '预知', '底抽', '洗混'];
     if (!playable.includes(card)) {
       socket.emit('errorMsg', { message: `暂不支持此卡牌：${card}` });
@@ -569,7 +672,66 @@ io.on('connection', (socket) => {
     });
   });
 
-  // 抽牌（从牌顶抽）
+  // 角色牌两张成对打出 -> 抽取目标 1 张牌（不公开目标手牌）
+  socket.on('playPair', ({ card, targetId } = {}) => {
+    const v = validateCanPlayTurnAction(socket);
+    if (!v.ok) {
+      socket.emit('errorMsg', { message: v.msg });
+      return;
+    }
+    if (!CHARACTER_CARDS.includes(card)) {
+      socket.emit('errorMsg', { message: '成对出牌参数错误：不是角色牌' });
+      return;
+    }
+    if (!targetId || typeof targetId !== 'string') {
+      socket.emit('errorMsg', { message: '请选择一个目标玩家' });
+      return;
+    }
+    if (targetId === socket.id) {
+      socket.emit('errorMsg', { message: '不能选择自己' });
+      return;
+    }
+    if (!players[targetId]) {
+      socket.emit('errorMsg', { message: '目标玩家不存在' });
+      return;
+    }
+
+    const actor = players[socket.id];
+    const hand = actor.hand;
+
+    // 找两张
+    const indices = [];
+    for (let i = 0; i < hand.length; i++) {
+      if (hand[i] === card) indices.push(i);
+      if (indices.length === 2) break;
+    }
+    if (indices.length < 2) {
+      socket.emit('errorMsg', { message: `你没有两张【${card}】` });
+      return;
+    }
+
+    // 删两张（从大到小删）
+    indices.sort((a, b) => b - a);
+    hand.splice(indices[0], 1);
+    hand.splice(indices[1], 1);
+
+    // 两张都弃置（即使被阻止也会弃置，符合你的规则）
+    discard(card);
+    discard(card);
+
+    io.emit('cardPlayed', { id: socket.id, card: `${card}×2` });
+
+    // 可被阻止的待结算动作
+    createPendingAction({
+      actorId: socket.id,
+      displayCard: `${card}×2`,
+      effectCard: 'PAIR_STEAL',
+      pairCard: card,
+      targetId
+    });
+  });
+
+  // 抽牌（牌顶）
   socket.on('drawCard', () => {
     if (phase !== 'playing') {
       socket.emit('errorMsg', { message: '需要至少 2 名玩家且游戏进行中才能抽牌' });
@@ -607,8 +769,6 @@ io.on('connection', (socket) => {
     defusingPlayerId = null;
 
     io.emit('bombInserted');
-
-    // 插完炸弹后，结束一个回合
     endOneTurnOrAdvance();
   });
 
