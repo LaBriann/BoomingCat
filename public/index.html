@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>爆炸小黄人 - 完整版</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+
+  <style>
+    body { background: #222; overflow: hidden; font-family: sans-serif; margin: 0; user-select: none; }
+
+    .scene {
+      perspective: 1000px;
+      width: 100vw; height: 100vh;
+      display: flex; justify-content: center; align-items: center;
+    }
+
+    .table {
+      width: 90vw; height: 60vh; max-width: 800px;
+      background: #2c3e50; border: 8px solid #5d4037; border-radius: 20px;
+      transform: rotateX(40deg) translateY(50px);
+      transform-style: preserve-3d; position: relative;
+      box-shadow: 0 50px 50px rgba(0,0,0,0.5);
+    }
+
+    .info-text {
+      position: absolute; top: -60px; width: 100%;
+      text-align: center; color: white;
+      font-size: 18px; text-shadow: 0 2px 4px black;
+      transform: translateZ(20px);
+    }
+
+    .draw-pile {
+      position: absolute; top: 50%; left: 50%;
+      width: 100px; height: 140px;
+      background: #ff9800;
+      border: 4px solid white; border-radius: 8px;
+      transform: translate(-50%, -50%) translateZ(2px);
+      display: flex; justify-content: center; align-items: center;
+      font-size: 30px; color: white; font-weight: bold;
+      cursor: pointer; box-shadow: 5px 5px 15px rgba(0,0,0,0.5);
+      transition: 0.3s;
+    }
+
+    .my-turn-glow {
+      box-shadow: 0 0 30px #00e676; border-color: #00e676;
+      transform: translate(-50%, -50%) translateZ(20px) scale(1.1);
+    }
+
+    .draw-pile.is-bomb {
+      background: #ff5252;
+      border-color: #ff8a80;
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+      0% { transform: translate(-50%, -50%) translateZ(20px) scale(1.1); }
+      50% { transform: translate(-50%, -50%) translateZ(20px) scale(1.15); }
+      100% { transform: translate(-50%, -50%) translateZ(20px) scale(1.1); }
+    }
+
+    .my-hand {
+      position: absolute; bottom: 30px; width: 100%;
+      display: flex; justify-content: center; gap: 10px;
+      transform: translateZ(50px);
+      flex-wrap: wrap;
+      padding: 0 10px;
+    }
+
+    .card {
+      width: 70px; height: 100px; background: white; border-radius: 6px;
+      display: flex; justify-content: center; align-items: center;
+      font-weight: bold; box-shadow: 2px 2px 5px rgba(0,0,0,0.3); font-size: 14px;
+      transition: 0.2s;
+    }
+
+    .card:hover { transform: translateY(-20px); }
+
+    .card.defuse { background: #b9f6ca; color: #1b5e20; border: 2px solid #00c853; }
+
+    /* 跳过牌可用时高亮 */
+    .card.playable {
+      border: 2px solid #00e676;
+      box-shadow: 0 0 12px rgba(0, 230, 118, 0.7);
+      cursor: pointer;
+    }
+
+    .modal-overlay {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.9); z-index: 1000;
+      display: flex; flex-direction: column; justify-content: center; align-items: center;
+      color: white;
+    }
+
+    .slider-container { width: 80%; max-width: 400px; margin: 30px 0; text-align: center; }
+    input[type=range] { width: 100%; height: 20px; accent-color: #ff9800; cursor: pointer; }
+
+    .confirm-btn {
+      padding: 15px 40px; font-size: 18px; background: #ff5252; color: white;
+      border: none; border-radius: 50px; cursor: pointer; font-weight: bold;
+      box-shadow: 0 0 20px #ff5252; margin-top: 20px;
+    }
+    .confirm-btn:active { transform: scale(0.95); }
+
+    .checkbox-wrapper {
+      margin-top: 15px; display: flex; align-items: center; justify-content: center; gap: 10px;
+      background: rgba(255, 255, 255, 0.1); padding: 10px 20px; border-radius: 20px;
+      border: 1px solid #ff5252;
+    }
+    input[type=checkbox] { width: 20px; height: 20px; accent-color: #ff5252; cursor: pointer;}
+  </style>
+</head>
+
+<body>
+<div id="app">
+
+  <!-- 结算弹窗 -->
+  <div v-if="isGameOver" class="modal-overlay" style="background: rgba(44, 62, 80, 0.98);">
+    <div style="font-size: 80px; margin-bottom: 20px;">
+      {{ isWinner ? '🏆' : '💀' }}
+    </div>
+
+    <h1 style="font-size: 40px; margin: 0;">
+      {{ isWinner ? '你赢了！' : '游戏结束' }}
+    </h1>
+
+    <p style="font-size: 20px; color: #ccc; margin-top: 10px;">
+      {{ winReasonText }}
+    </p>
+
+    <button class="confirm-btn"
+            style="background: #00e676; box-shadow: 0 0 20px #00e676;"
+            @click="requestRestart">
+      🔄 再来一局
+    </button>
+  </div>
+
+  <!-- 死亡弹窗：注意！结算时不显示，避免挡住“再来一局” -->
+  <div v-if="amIDead && !isGameOver" class="modal-overlay" style="background: rgba(50,0,0,0.95);">
+    <h1 style="font-size: 50px; color: red;">YOU DIED</h1>
+    <p>你炸了。</p>
+    <p style="color:#ccc; margin-top:10px;">等待本局结束...</p>
+  </div>
+
+  <!-- 拆弹弹窗 -->
+  <div v-if="isDefusing" class="modal-overlay">
+    <h1>⚠️ 炸弹拆除成功！</h1>
+    <p>决定要把炸弹塞回哪里...</p>
+
+    <div class="slider-container">
+      <input type="range" v-model="insertIndex" min="0" :max="deckMaxIndex" step="1">
+
+      <div style="display: flex; justify-content: space-between; margin-top: 10px; color: #aaa;">
+        <span>牌底 (安全)</span>
+        <span style="color: #ff9800; font-weight: bold;">{{ insertPositionText }}</span>
+        <span>牌顶 (危险)</span>
+      </div>
+
+      <div class="checkbox-wrapper" v-if="parseInt(insertIndex) === deckMaxIndex">
+        <input type="checkbox" id="publicBomb" v-model="isPublicInsert">
+        <label for="publicBomb" style="cursor: pointer; font-weight: bold;">☠️ 明牌放置 (公开处刑)</label>
+      </div>
+
+      <div v-else style="margin-top: 20px; font-size: 12px; color: #666; height: 42px;">
+        暗牌埋藏中...
+      </div>
+    </div>
+
+    <button class="confirm-btn" @click="confirmInsert">确定埋藏</button>
+  </div>
+
+  <div class="scene">
+    <div class="table">
+
+      <div class="info-text">
+        <div v-if="phase === 'waiting'" style="color:#ffca28;">
+          🟡 等待玩家加入（至少 2 人）
+        </div>
+        <div v-else-if="phase === 'ended'" style="color:#ffca28;">
+          🟣 本局已结束
+        </div>
+        <div v-else-if="amIDead">已死亡</div>
+        <div v-else-if="isMyTurn" style="color:#00e676">🟢 轮到你了</div>
+        <div v-else>🔴 等待对手...</div>
+
+        <div v-if="lastActionMsg" style="font-size:14px; color: #ffca28; margin-top:5px;">
+          {{ lastActionMsg }}
+        </div>
+      </div>
+
+      <div
+        class="draw-pile"
+        :class="{
+          'my-turn-glow': isMyTurn && !isDefusing && !isGameOver && phase === 'playing',
+          'is-bomb': topCardPublic === '炸弹'
+        }"
+        @click="drawCard"
+      >
+        {{ topCardPublic === '炸弹' ? '☠️' : deckCount }}
+
+        <div style="font-size: 12px; position: absolute; bottom: 10px; font-weight: normal;">
+          {{ topCardPublic === '炸弹' ? '下张必死' : '点击抽牌' }}
+        </div>
+      </div>
+
+      <div class="my-hand">
+        <div
+          v-for="(card, i) in myHand"
+          :key="i"
+          class="card"
+          :class="{
+            'defuse': card === '拆除',
+            'playable': canPlaySkip && card === '跳过'
+          }"
+          @click="(canPlaySkip && card === '跳过') ? playSkip() : null"
+          :title="(canPlaySkip && card === '跳过') ? '点击使用：跳过本回合（不抽牌）' : ''"
+        >
+          {{ card }}
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const { createApp, ref, computed } = Vue;
+  const socket = io();
+
+  createApp({
+    setup() {
+      // --- 状态 ---
+      const myId = ref('');
+      const myHand = ref([]);
+      const deckCount = ref(0);
+      const currentTurnId = ref(null);
+      const amIDead = ref(false);
+      const lastActionMsg = ref('');
+
+      const phase = ref('waiting'); // waiting | playing | ended
+
+      const isDefusing = ref(false);
+      const insertIndex = ref(0);
+      const deckMaxIndex = ref(0);
+      const topCardPublic = ref(null);
+      const isPublicInsert = ref(false);
+
+      const isGameOver = ref(false);
+      const isWinner = ref(false);
+      const winReasonText = ref('');
+
+      function applyEnded(wid) {
+        isGameOver.value = true;
+
+        if (wid === null || wid === undefined) {
+          isWinner.value = false;
+          winReasonText.value = "☠️ 无人幸存（同归于尽）";
+        } else if (wid === myId.value) {
+          isWinner.value = true;
+          winReasonText.value = "🎉 恭喜！你是最后的幸存者！";
+        } else {
+          isWinner.value = false;
+          winReasonText.value = "👻 你被淘汰了，胜者是别人。";
+        }
+      }
+
+      // --- 连接 ---
+      socket.on('connect', () => {
+        myId.value = socket.id;
+        socket.emit('requestState');
+      });
+
+      // --- 核心状态同步 ---
+      socket.on('gameState', (data) => {
+        if (!myId.value && socket.id) myId.value = socket.id;
+
+        deckCount.value = data.deckCount;
+        currentTurnId.value = data.currentTurn;
+        topCardPublic.value = data.topCardPublic;
+
+        phase.value = data.phase || 'waiting';
+
+        // 同步自己数据
+        if (myId.value && data.players && data.players[myId.value]) {
+          const me = data.players[myId.value];
+          myHand.value = me.hand;
+          amIDead.value = me.isDead;
+        } else {
+          if (socket.connected) socket.emit('requestState');
+        }
+
+        // 用 phase 决定是否弹结算
+        if (phase.value === 'ended') {
+          applyEnded(data.winnerId);
+        } else {
+          isGameOver.value = false;
+          isWinner.value = false;
+          winReasonText.value = '';
+        }
+      });
+
+      socket.on('askInsertBomb', (data) => {
+        isDefusing.value = true;
+        deckMaxIndex.value = data.maxIndex;
+        insertIndex.value = data.maxIndex;
+        isPublicInsert.value = false;
+      });
+
+      socket.on('playerDied', (data) => {
+        if (data.id !== socket.id) lastActionMsg.value = "💥 对手炸了！";
+      });
+
+      socket.on('bombInserted', () => {
+        lastActionMsg.value = "👀 炸弹已被埋回...";
+      });
+
+      // 跳过牌提示
+      socket.on('cardPlayed', (data) => {
+        if (!data) return;
+        if (data.id === socket.id) lastActionMsg.value = `🃏 你使用了【${data.card}】`;
+        else lastActionMsg.value = `🃏 对手使用了【${data.card}】`;
+      });
+
+      socket.on('gameOver', (data) => {
+        applyEnded(data.winnerId);
+      });
+
+      socket.on('gameRestarted', () => {
+        isGameOver.value = false;
+        isWinner.value = false;
+        winReasonText.value = '';
+
+        amIDead.value = false;
+        isDefusing.value = false;
+        lastActionMsg.value = "=== 新游戏开始 ===";
+        insertIndex.value = 0;
+        topCardPublic.value = null;
+
+        socket.emit('requestState');
+      });
+
+      socket.on('errorMsg', (data) => {
+        if (data && data.message) lastActionMsg.value = "⚠️ " + data.message;
+      });
+
+      // --- 计算属性 ---
+      const isMyTurn = computed(() => {
+        return phase.value === 'playing'
+          && socket.id === currentTurnId.value
+          && !amIDead.value;
+      });
+
+      const canPlaySkip = computed(() => {
+        return phase.value === 'playing'
+          && !isGameOver.value
+          && !amIDead.value
+          && isMyTurn.value
+          && !isDefusing.value
+          && myHand.value.includes('跳过');
+      });
+
+      const insertPositionText = computed(() => {
+        const idx = parseInt(insertIndex.value);
+        if (idx === deckMaxIndex.value) return "牌顶 (最危险)";
+        if (idx === 0) return "牌底 (最安全)";
+        return `第 ${idx + 1} 张`;
+      });
+
+      // --- 交互 ---
+      const drawCard = () => {
+        if (phase.value !== 'playing') return;
+        if (isMyTurn.value && !isDefusing.value) socket.emit('drawCard');
+      };
+
+      const playSkip = () => {
+        if (!canPlaySkip.value) return;
+        socket.emit('playCard', { card: '跳过' });
+      };
+
+      const confirmInsert = () => {
+        isDefusing.value = false;
+        socket.emit('insertBomb', {
+          index: parseInt(insertIndex.value),
+          isPublic: isPublicInsert.value
+        });
+      };
+
+      const requestRestart = () => {
+        socket.emit('restartGame');
+      };
+
+      return {
+        // state
+        myHand, deckCount, currentTurnId, amIDead, lastActionMsg,
+        phase,
+        isDefusing, insertIndex, deckMaxIndex, insertPositionText, topCardPublic, isPublicInsert,
+        isGameOver, isWinner, winReasonText,
+
+        // computed
+        isMyTurn, canPlaySkip,
+
+        // actions
+        drawCard, playSkip, confirmInsert, requestRestart
+      };
+    }
+  }).mount('#app');
+</script>
+</body>
+</html>
