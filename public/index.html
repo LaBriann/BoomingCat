@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>爆炸小黄人 - 完整版</title>
+  <title>爆炸小黄人 - 房间版</title>
 
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
   <script src="/socket.io/socket.io.js"></script>
@@ -133,7 +133,7 @@
 
     .player-panel {
       position: fixed; top: 12px; right: 12px;
-      width: 260px; max-height: 45vh; overflow: auto;
+      width: 280px; max-height: 45vh; overflow: auto;
       background: rgba(0,0,0,0.55);
       border: 1px solid rgba(255,255,255,0.18);
       border-radius: 12px;
@@ -142,7 +142,25 @@
       z-index: 900;
       backdrop-filter: blur(6px);
     }
-    .player-panel h3 { margin: 0 0 8px 0; font-size: 14px; color: #ffca28; font-weight: 700; }
+    .player-panel h3 {
+      margin: 0 0 8px 0;
+      font-size: 14px;
+      color: #ffca28;
+      font-weight: 700;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+    }
+    .room-pill {
+      font-size: 12px;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.2);
+      padding: 2px 8px;
+      border-radius: 999px;
+      color: #fff;
+      font-weight: 800;
+    }
+
     .player-row {
       display: flex; justify-content: space-between; align-items: center;
       padding: 6px 8px; border-radius: 10px; margin-bottom: 6px;
@@ -187,6 +205,7 @@
     .chat-msg { margin-bottom: 8px; line-height: 1.35; }
     .chat-msg .meta { opacity: 0.75; margin-right: 6px; }
     .chat-msg.me .meta { color: #00e676; opacity: 0.95; }
+
     .chat-input {
       display: flex;
       border-top: 1px solid rgba(255,255,255,0.12);
@@ -212,7 +231,6 @@
       color: #0b1a12;
       font-weight: 800;
     }
-    .chat-input button:active { transform: scale(0.98); }
 
     /* 折叠聊天面板 */
     .chat-panel.collapsed { height: 44px; }
@@ -228,36 +246,13 @@
       font-weight: 700;
     }
 
-    .target-list {
-      width: 90%;
-      max-width: 420px;
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 14px;
-      padding: 14px;
-      margin-top: 14px;
-    }
-    .target-item {
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      padding: 10px 12px;
-      border-radius: 12px;
-      margin-bottom: 10px;
-      background: rgba(0,0,0,0.25);
-      cursor: pointer;
-      border: 1px solid rgba(255,255,255,0.08);
-    }
-    .target-item:hover { border-color: rgba(0,230,118,0.6); }
-    .target-item.disabled { opacity: 0.35; cursor: not-allowed; }
-
     /* 手机适配：缩小面板占用 */
     @media (max-width: 600px) {
       .chat-panel { width: 92vw; right: 4vw; bottom: 10px; height: 220px; }
       .player-panel { width: 92vw; right: 4vw; top: 10px; max-height: 26vh; }
     }
 
-    /* --- 大号Toast（爆炸/拆弹提示） --- */
+    /* Toast */
     .toast {
       position: fixed;
       left: 50%;
@@ -285,6 +280,70 @@
       from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
       to   { opacity: 1; transform: translateX(-50%) translateY(0); }
     }
+
+    /* 大厅输入框 */
+    .lobby-card {
+      width: min(92vw, 520px);
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.16);
+      border-radius: 18px;
+      padding: 18px 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      backdrop-filter: blur(10px);
+    }
+    .lobby-title { font-size: 22px; font-weight: 900; margin: 0 0 10px 0; }
+    .lobby-row { display:flex; gap:10px; margin-top: 10px; flex-wrap: wrap; }
+    .lobby-input {
+      flex: 1;
+      min-width: 180px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+      padding: 10px 12px;
+      outline: none;
+      font-size: 14px;
+    }
+    .lobby-btn {
+      border: none;
+      border-radius: 12px;
+      padding: 10px 14px;
+      cursor: pointer;
+      font-weight: 900;
+      background: rgba(0,230,118,0.9);
+      color: #0b1a12;
+      min-width: 120px;
+    }
+    .lobby-btn.secondary {
+      background: rgba(255,255,255,0.14);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.18);
+    }
+    .lobby-hint { color: #ccc; font-size: 12px; margin-top: 8px; line-height: 1.5; }
+
+    /* ✅ 目标选择弹窗 */
+    .target-list {
+      width: 90%;
+      max-width: 520px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 14px;
+      padding: 14px;
+      margin-top: 14px;
+    }
+    .target-item {
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      padding: 12px 12px;
+      border-radius: 12px;
+      margin-bottom: 10px;
+      background: rgba(0,0,0,0.25);
+      cursor: pointer;
+      border: 1px solid rgba(255,255,255,0.10);
+    }
+    .target-item:hover { border-color: rgba(0,230,118,0.70); }
+    .target-item.disabled { opacity: 0.35; cursor: not-allowed; }
   </style>
 </head>
 
@@ -296,9 +355,82 @@
     {{ toast.text }}
   </div>
 
+  <!-- 大厅：昵称 + 创建/加入房间 -->
+  <div v-if="!inRoom" class="modal-overlay" style="background: rgba(0,0,0,0.88);">
+    <div class="lobby-card">
+      <div class="lobby-title">进入房间</div>
+
+      <div class="lobby-row">
+        <input class="lobby-input" v-model="nameInput" placeholder="输入你的昵称（最多16字）" />
+      </div>
+
+      <div class="lobby-row">
+        <button class="lobby-btn" @click="createRoom">创建房间</button>
+        <button class="lobby-btn secondary" @click="joinRoom">加入房间</button>
+      </div>
+
+      <div class="lobby-row">
+        <input class="lobby-input" v-model="roomInput" placeholder="房间号（如 ABCD2）" style="text-transform:uppercase;" />
+      </div>
+
+      <div class="lobby-hint">
+        规则：房间仅在服务器运行期间有效；刷新页面需要重新加入房间。<br />
+        加入房间后，至少 2 人即可自动开始新局。
+      </div>
+
+      <div v-if="lobbyError" class="lobby-hint" style="color:#ff8a80; font-weight:800;">
+        {{ lobbyError }}
+      </div>
+    </div>
+  </div>
+
+  <!-- ✅ 成对牌：选择目标弹窗 -->
+  <div v-if="isChoosingTarget" class="modal-overlay" style="background: rgba(0,0,0,0.92);">
+    <h1 style="margin:0;">🎭 两张【{{ pairCardToPlay }}】</h1>
+    <p style="color:#ccc; margin-top:10px;">选择一个目标玩家，随机抽取他 1 张牌（不公开对方手牌）。</p>
+
+    <div class="target-list">
+      <div
+        class="target-item"
+        v-for="p in stealTargets"
+        :key="p.id"
+        :class="{ disabled: p.isDead }"
+        @click="selectTarget(p)"
+      >
+        <div style="display:flex; flex-direction:column; gap:4px;">
+          <div style="font-weight:900;">
+            {{ p.name || shortId(p.id) }}
+            <span v-if="p.id === currentTurnId" style="color:#00e676; margin-left:8px; font-weight:800;">当前回合</span>
+          </div>
+          <div style="font-size:12px; opacity:0.8;">
+            {{ p.isDead ? '已死亡' : '存活' }}
+          </div>
+        </div>
+
+        <div style="opacity:0.9; font-weight:800;">
+          手牌：{{ p.handCount }}
+        </div>
+      </div>
+
+      <div v-if="stealTargets.length === 0" style="color:#ccc; padding: 10px 6px;">
+        当前没有可选择的目标。
+      </div>
+    </div>
+
+    <button class="confirm-btn"
+            style="background:#607d8b; box-shadow:none;"
+            @click="cancelChooseTarget">
+      取消
+    </button>
+  </div>
+
   <!-- 玩家列表 -->
-  <div class="player-panel">
-    <h3>玩家列表（手牌数）</h3>
+  <div class="player-panel" v-if="inRoom">
+    <h3>
+      <span>玩家列表（手牌数）</span>
+      <span class="room-pill">房间：{{ roomId }}</span>
+    </h3>
+
     <div
       class="player-row"
       v-for="p in otherPlayersSorted"
@@ -309,7 +441,10 @@
       }"
     >
       <div class="player-left">
-        <div class="pid">{{ shortId(p.id) }} <span v-if="p.id === myId">(你)</span></div>
+        <div class="pid">
+          {{ p.name || shortId(p.id) }}
+          <span v-if="p.id === myId">(你)</span>
+        </div>
         <div class="status">
           <span v-if="p.isDead" style="color:#ff5252;">已死亡</span>
           <span v-else style="color:#00e676;">存活</span>
@@ -320,7 +455,7 @@
   </div>
 
   <!-- 聊天区（可折叠） -->
-  <div class="chat-panel" :class="{ collapsed: chatCollapsed }">
+  <div class="chat-panel" :class="{ collapsed: chatCollapsed }" v-if="inRoom">
     <div class="chat-header">
       <div>聊天</div>
       <div style="display:flex; align-items:center; gap:8px;">
@@ -338,7 +473,7 @@
         :key="idx"
         :class="{ 'me': m.id === myId }"
       >
-        <span class="meta">[{{ timeText(m.ts) }}] {{ shortId(m.id) }}:</span>
+        <span class="meta">[{{ timeText(m.ts) }}] {{ m.name || shortId(m.id) }}:</span>
         <span>{{ m.text }}</span>
       </div>
     </div>
@@ -351,34 +486,6 @@
       />
       <button @click="sendChat">发送</button>
     </div>
-  </div>
-
-  <!-- 选择目标玩家 Modal（角色牌两张成对） -->
-  <div v-if="isChoosingTarget" class="modal-overlay" style="background: rgba(0,0,0,0.92);">
-    <h1 style="margin:0;">🎭 两张【{{ pairCardToPlay }}】</h1>
-    <p style="color:#ccc; margin-top:10px;">选择一个目标玩家，随机抽他 1 张牌（不公开对方手牌）。</p>
-
-    <div class="target-list">
-      <div
-        class="target-item"
-        v-for="p in stealTargets"
-        :key="p.id"
-        :class="{ disabled: p.isDead }"
-        @click="selectTarget(p)"
-      >
-        <div>
-          {{ shortId(p.id) }}
-          <span v-if="p.id === currentTurnId" style="color:#00e676; margin-left:6px;">当前回合</span>
-        </div>
-        <div style="opacity:0.9;">手牌：{{ p.handCount }}</div>
-      </div>
-    </div>
-
-    <button class="confirm-btn"
-            style="background:#607d8b; box-shadow:none;"
-            @click="cancelChooseTarget">
-      取消
-    </button>
   </div>
 
   <!-- 结算弹窗 -->
@@ -458,7 +565,7 @@
     <button class="confirm-btn" @click="confirmInsert">确定埋藏</button>
   </div>
 
-  <div class="scene">
+  <div class="scene" v-if="inRoom">
     <div class="table">
 
       <div class="info-text">
@@ -538,7 +645,17 @@
 
   createApp({
     setup() {
+      // 房间/大厅
+      const inRoom = ref(false);
+      const roomId = ref('');
+      const nameInput = ref('');
+      const roomInput = ref('');
+      const lobbyError = ref('');
+
+      // 游戏状态
       const myId = ref('');
+      const myName = ref('');
+
       const myHand = ref([]);
       const currentTurnId = ref(null);
       const deckCount = ref(0);
@@ -571,7 +688,7 @@
       const isPreviewing = ref(false);
       const previewCards = ref([]);
 
-      // 玩家公共信息（只含 handCount）
+      // 玩家公共信息
       const playersPublic = ref({});
 
       // 聊天
@@ -579,8 +696,16 @@
       const chatInput = ref('');
       const chatBody = ref(null);
 
-      // 聊天折叠
+      // 聊天折叠（手机默认折叠）
       const chatCollapsed = ref(false);
+      const toggleChat = () => {
+        chatCollapsed.value = !chatCollapsed.value;
+        if (!chatCollapsed.value) autoScrollChat();
+      };
+      function applyChatDefaultByWidth() {
+        chatCollapsed.value = window.innerWidth <= 600;
+      }
+      let onResize = null;
 
       // Toast
       const toast = ref({ show: false, text: '', kind: 'info' });
@@ -593,16 +718,14 @@
 
       // 角色牌
       const characterCards = ['海绵爸爸', '派小星', '章鱼弟'];
-
-      // 选择目标（成对出牌）
-      const isChoosingTarget = ref(false);
-      const pairCardToPlay = ref(null);
-
-      // 主动牌
       const activeTurnCards = ['跳过', '攻击', '预知', '克隆牌', '底抽', '洗混'];
       const nopeCard = '阻止';
 
-      // 关键：由服务端下发是否轮到我
+      // ✅ 成对牌：目标选择弹窗状态
+      const isChoosingTarget = ref(false);
+      const pairCardToPlay = ref(null);
+
+      // 服务端下发是否轮到我
       const isMyTurnServer = ref(false);
 
       const shortId = (id) => id ? id.slice(0, 6) : '';
@@ -649,7 +772,6 @@
         for (const c of myHand.value) m[c] = (m[c] || 0) + 1;
         return m;
       });
-
       const cardCount = (card) => countMap.value[card] || 0;
 
       const playerCount = computed(() => Object.keys(playersPublic.value || {}).length);
@@ -669,7 +791,7 @@
           const bAlive = b.isDead ? 0 : 1;
           if (aAlive !== bAlive) return bAlive - aAlive;
 
-          return a.id.localeCompare(b.id);
+          return (a.name || a.id).localeCompare(b.name || b.id);
         });
         return arr;
       });
@@ -684,6 +806,15 @@
           && !isChoosingTarget.value;
       });
 
+      const canPlayPairNow = computed(() => {
+        return phase.value === 'playing'
+            && !isGameOver.value
+            && !amIDead.value
+            && isMyTurnServer.value
+            && !isDefusing.value
+            && !pendingAction.value;
+        });
+
       const canPlayNope = computed(() => {
         return phase.value === 'playing'
           && !isGameOver.value
@@ -695,8 +826,12 @@
 
       const pendingActionText = computed(() => {
         if (!pendingAction.value) return '';
-        const pa = pendingAction.value;
-        return `${pa.displayCard}`;
+        return `${pendingAction.value.displayCard}`;
+      });
+
+      // ✅ 可偷目标列表（排除自己）
+      const stealTargets = computed(() => {
+        return Object.values(playersPublic.value || {}).filter(p => p.id !== myId.value);
       });
 
       function tickMsLeft() {
@@ -728,34 +863,68 @@
         }
       }
 
-      const toggleChat = () => {
-        chatCollapsed.value = !chatCollapsed.value;
-        if (!chatCollapsed.value) autoScrollChat();
+      // ---- 房间动作 ----
+      const createRoom = () => {
+        lobbyError.value = '';
+        socket.emit('createRoom', { name: nameInput.value });
+      };
+      const joinRoom = () => {
+        lobbyError.value = '';
+        socket.emit('joinRoom', { roomId: roomInput.value, name: nameInput.value });
       };
 
-      function applyChatDefaultByWidth() {
-        chatCollapsed.value = window.innerWidth <= 600;
-      }
-
-      let onResize = null;
-
-      // --- Socket 监听 ---
+      // ---- socket ----
       socket.on('connect', () => {
         myId.value = socket.id;
+      });
+
+      socket.on('roomCreated', (data) => {
+        if (data?.roomId) {
+          roomId.value = data.roomId;
+          roomInput.value = data.roomId;
+          showToast('info', `✅ 已创建房间：${data.roomId}`, 1600);
+        }
+      });
+
+      socket.on('roomJoined', (data) => {
+        inRoom.value = true;
+        lobbyError.value = '';
+        roomId.value = data.roomId || roomId.value;
+        myName.value = data.name || myName.value;
+        showToast('info', `进入房间：${roomId.value}`, 1200);
         socket.emit('requestState');
       });
 
+      socket.on('roomLeft', () => {
+        inRoom.value = false;
+        roomId.value = '';
+        myName.value = '';
+        playersPublic.value = {};
+        myHand.value = [];
+        chatMessages.value = [];
+        showToast('info', '已离开房间', 1200);
+      });
+
+      socket.on('roomError', (data) => {
+        lobbyError.value = data?.message || '操作失败';
+        showToast('boom', lobbyError.value, 2200);
+      });
+
       socket.on('gameState', (data) => {
+        if (!data) return;
+
+        if (data.roomId) roomId.value = data.roomId;
         if (data.youId) myId.value = data.youId;
+        if (data.youName !== undefined) myName.value = data.youName;
 
         isMyTurnServer.value = !!data.isMyTurn;
 
         playersPublic.value = data.players || {};
         myHand.value = data.myHand || [];
 
-        deckCount.value = data.deckCount;
-        currentTurnId.value = data.currentTurn;
-        topCardPublic.value = data.topCardPublic;
+        deckCount.value = data.deckCount ?? 0;
+        currentTurnId.value = data.currentTurn ?? null;
+        topCardPublic.value = data.topCardPublic ?? null;
 
         phase.value = data.phase || 'waiting';
 
@@ -779,6 +948,12 @@
           isWinner.value = false;
           winReasonText.value = '';
         }
+
+        // 如果不再满足出牌条件，自动关闭“选目标弹窗”（防止卡住）
+        if (isChoosingTarget.value && !canPlayPairNow.value) {
+          isChoosingTarget.value = false;
+          pairCardToPlay.value = null;
+        }
       });
 
       socket.on('chatMessage', (m) => {
@@ -793,6 +968,10 @@
         deckMaxIndex.value = data.maxIndex;
         insertIndex.value = data.maxIndex;
         isPublicInsert.value = false;
+
+        // 拆弹中不允许选目标
+        isChoosingTarget.value = false;
+        pairCardToPlay.value = null;
       });
 
       socket.on('previewCards', (data) => {
@@ -802,13 +981,15 @@
 
       socket.on('cardPlayed', (data) => {
         if (!data) return;
-        const actor = (data.id === myId.value) ? '你' : '对手';
+        const actorName = playersPublic.value?.[data.id]?.name || shortId(data.id);
+        const actor = (data.id === myId.value) ? '你' : actorName;
         lastActionMsg.value = `🃏 ${actor} 使用【${data.card}】`;
       });
 
       socket.on('nopePlayed', (data) => {
         if (!data) return;
-        const actor = (data.id === myId.value) ? '你' : '对手';
+        const actorName = playersPublic.value?.[data.id]?.name || shortId(data.id);
+        const actor = (data.id === myId.value) ? '你' : actorName;
         lastActionMsg.value = `✋ ${actor} 打出了【阻止】（次数：${data.nopeCount}）`;
       });
 
@@ -820,11 +1001,14 @@
 
       socket.on('pairSteal', (data) => {
         if (!data) return;
-        const actor = data.actorId === myId.value ? '你' : shortId(data.actorId);
-        const target = data.targetId === myId.value ? '你' : shortId(data.targetId);
+        const actorName = playersPublic.value?.[data.actorId]?.name || shortId(data.actorId);
+        const targetName = playersPublic.value?.[data.targetId]?.name || shortId(data.targetId);
+
+        const actor = data.actorId === myId.value ? '你' : actorName;
+        const target = data.targetId === myId.value ? '你' : targetName;
 
         if (!data.success) {
-          lastActionMsg.value = `🎭 ${actor} 尝试从 ${target} 抽取失败：${data.reason || '未知原因'}`;
+          lastActionMsg.value = `🎭 ${actor} 抽取失败：${data.reason || '未知原因'}`;
           return;
         }
         lastActionMsg.value = `🎭 ${actor} 从 ${target} 抽走了一张牌`;
@@ -836,42 +1020,42 @@
       });
 
       socket.on('stolenFromYou', (data) => {
-        const who = data?.by ? shortId(data.by) : '某人';
+        const whoId = data?.by;
+        const who = playersPublic.value?.[whoId]?.name || shortId(whoId) || '某人';
         lastActionMsg.value = `😵 你被 ${who} 抽走了一张牌`;
-      });
-
-      // ✅ 爆炸：Toast 强提示（需要服务端 emit playerDied）
-      socket.on('playerDied', (data) => {
-        if (!data?.id) return;
-        if (data.id === myId.value) showToast('boom', '💥 你爆炸了！', 2600);
-        else showToast('boom', '💥 对手爆炸了！', 2600);
-      });
-
-      // ✅ 拆弹成功：Toast（需要服务端 emit bombDefused）
-      socket.on('bombDefused', (data) => {
-        if (!data?.id) return;
-        const via = data.via || '拆除';
-        if (data.id === myId.value) showToast('defuse', `🛡 你拆除了炸弹（${via}）`, 2200);
-        else showToast('defuse', `🛡 对手拆除了炸弹（${via}）`, 2200);
-      });
-
-      // ✅ 炸弹埋回：Toast
-      socket.on('bombInserted', () => {
-        showToast('info', '👀 炸弹已被塞回牌堆', 1600);
-        lastActionMsg.value = "👀 炸弹已被埋回...";
       });
 
       socket.on('bombDrawn', (data) => {
         if (!data?.id) return;
-
+        const actorName = playersPublic.value?.[data.id]?.name || shortId(data.id);
         if (data.id === myId.value) {
-            showToast('boom', '☠️ 你抽到了炸弹！', 2200);
-            lastActionMsg.value = '☠️ 你抽到了炸弹！';
+          showToast('boom', '☠️ 你抽到了炸弹！', 2200);
+          lastActionMsg.value = '☠️ 你抽到了炸弹！';
         } else {
-            showToast('boom', '☠️ 对手抽到了炸弹！', 2200);
-            lastActionMsg.value = '☠️ 对手抽到了炸弹！';
+          showToast('boom', `☠️ ${actorName} 抽到了炸弹！`, 2200);
+          lastActionMsg.value = `☠️ ${actorName} 抽到了炸弹！`;
         }
-    });
+      });
+
+      socket.on('bombDefused', (data) => {
+        if (!data?.id) return;
+        const via = data.via || '拆除';
+        const actorName = playersPublic.value?.[data.id]?.name || shortId(data.id);
+        if (data.id === myId.value) showToast('defuse', `🛡 你拆除了炸弹（${via}）`, 2200);
+        else showToast('defuse', `🛡 ${actorName} 拆除了炸弹（${via}）`, 2200);
+      });
+
+      socket.on('playerDied', (data) => {
+        if (!data?.id) return;
+        const actorName = playersPublic.value?.[data.id]?.name || shortId(data.id);
+        if (data.id === myId.value) showToast('boom', '💥 你爆炸了！', 2600);
+        else showToast('boom', `💥 ${actorName} 爆炸了！`, 2600);
+      });
+
+      socket.on('bombInserted', () => {
+        showToast('info', '👀 炸弹已被塞回牌堆', 1600);
+        lastActionMsg.value = "👀 炸弹已被埋回...";
+      });
 
       socket.on('gameOver', (data) => applyEnded(data.winnerId));
 
@@ -890,6 +1074,7 @@
         pendingAction.value = null;
         pendingMsLeft.value = 0;
 
+        // ✅ 新局开始关闭目标弹窗
         isChoosingTarget.value = false;
         pairCardToPlay.value = null;
 
@@ -903,11 +1088,9 @@
 
       onMounted(() => {
         msTimer = setInterval(tickMsLeft, 100);
-
         applyChatDefaultByWidth();
         onResize = () => applyChatDefaultByWidth();
         window.addEventListener('resize', onResize);
-
         autoScrollChat();
       });
 
@@ -917,7 +1100,7 @@
         if (toastTimer) clearTimeout(toastTimer);
       });
 
-      // --- 交互 ---
+      // ---- 游戏交互 ----
       const insertPositionText = computed(() => {
         const idx = parseInt(insertIndex.value);
         if (idx === deckMaxIndex.value) return "牌顶 (最危险)";
@@ -931,16 +1114,37 @@
           lastActionMsg.value = "⚠️ 有待结算动作，先等结算/使用阻止";
           return;
         }
-        if (isMyTurnServer.value && !isDefusing.value && !isChoosingTarget.value) {
-          socket.emit('drawCard');
-        }
+        if (isMyTurnServer.value && !isDefusing.value && !isChoosingTarget.value) socket.emit('drawCard');
       };
 
       const isCardPlayable = (card) => {
         if (card === '阻止') return canPlayNope.value;
         if (activeTurnCards.includes(card)) return canPlayTurnCard.value;
-        if (characterCards.includes(card)) return canPlayTurnCard.value && (cardCount(card) >= 2);
+        if (characterCards.includes(card)) return canPlayPairNow.value && (cardCount(card) >= 2);
         return false;
+      };
+
+      const cancelChooseTarget = () => {
+        isChoosingTarget.value = false;
+        pairCardToPlay.value = null;
+      };
+
+      const selectTarget = (p) => {
+        if (!p) return;
+        if (p.id === myId.value) return;        // 不会出现，但再保险
+        if (p.isDead) return;                   // 禁止选死人
+        if (!pairCardToPlay.value) return;
+
+        // 如果在点击期间状态变了，避免错误
+        if (!canPlayPairNow.value) {
+          showToast('boom', '当前不能出牌（状态已变化）', 1600);
+          cancelChooseTarget();
+          return;
+        }
+
+        const cc = pairCardToPlay.value;
+        cancelChooseTarget();
+        socket.emit('playPair', { card: cc, targetId: p.id });
       };
 
       const onCardClick = (card) => {
@@ -953,11 +1157,18 @@
           return;
         }
 
+        // ✅ 角色牌：两张同名 -> 打开目标选择弹窗
         if (characterCards.includes(card)) {
           if (!isCardPlayable(card)) {
             lastActionMsg.value = "⚠️ 角色牌需要两张同名，且必须在你回合使用";
             return;
           }
+
+          if (stealTargets.value.length === 0) {
+            showToast('info', '没有可选择的目标', 1600);
+            return;
+          }
+
           pairCardToPlay.value = card;
           isChoosingTarget.value = true;
           return;
@@ -992,45 +1203,28 @@
         chatInput.value = '';
       };
 
-      const stealTargets = computed(() => {
-        return Object.values(playersPublic.value || {}).filter(p => p.id !== myId.value);
-      });
-
-      const selectTarget = (p) => {
-        if (!p || p.id === myId.value) return;
-        if (p.isDead) {
-          lastActionMsg.value = "⚠️ 目标已死亡，不能选择";
-          return;
-        }
-        socket.emit('playPair', { card: pairCardToPlay.value, targetId: p.id });
-        isChoosingTarget.value = false;
-        pairCardToPlay.value = null;
-      };
-
-      const cancelChooseTarget = () => {
-        isChoosingTarget.value = false;
-        pairCardToPlay.value = null;
-      };
-
       return {
-        myId, myHand, currentTurnId, deckCount, phase, topCardPublic,
+        // lobby
+        inRoom, roomId, nameInput, roomInput, lobbyError, createRoom, joinRoom,
+
+        // state
+        myId, myName, myHand, currentTurnId, deckCount, phase, topCardPublic,
         discardCount, discardTopCard, turnsLeftForCurrent,
         pendingAction, pendingMsLeft,
         isDefusing, insertIndex, deckMaxIndex, isPublicInsert, insertPositionText,
-        amIDead,
-        isGameOver, isWinner, winReasonText,
-        lastActionMsg,
+        amIDead, isGameOver, isWinner, winReasonText, lastActionMsg,
         isPreviewing, previewCards,
-        playersPublic, playerCount, otherPlayersSorted, shortId,
-        chatMessages, chatInput, sendChat, chatBody, timeText,
+        playersPublic, playerCount, otherPlayersSorted, shortId, timeText,
+        chatMessages, chatInput, sendChat, chatBody,
         cardIcon, cardHelp, isCardPlayable, onCardClick,
         characterCards, cardCount,
-        isChoosingTarget, pairCardToPlay, stealTargets, selectTarget, cancelChooseTarget,
         drawCard, confirmInsert, requestRestart, closePreview,
-        pendingActionText,
-        isMyTurnServer,
+        pendingActionText, isMyTurnServer,
         chatCollapsed, toggleChat,
-        toast
+        toast,
+
+        // ✅ target modal
+        isChoosingTarget, pairCardToPlay, stealTargets, selectTarget, cancelChooseTarget
       };
     }
   }).mount('#app');
