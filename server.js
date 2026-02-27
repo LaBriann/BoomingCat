@@ -12,7 +12,7 @@ const rooms = new Map(); // roomId -> roomState
 const MIN_PLAYERS = 2;
 
 // 阻止等待窗口（你要求 5s）
-const NOPE_WINDOW_MS = 5000;
+const NOPE_WINDOW_MS = 3000;
 
 const CHARACTER_CARDS = ['海绵爸爸', '派小星', '章鱼弟'];
 
